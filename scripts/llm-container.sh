@@ -26,6 +26,24 @@ find_server() {
   fi
 }
 
+install_cuda_toolkit() {
+  # The compiler only, from NVIDIA's apt repo. Never the driver: in an LXC that comes from the Proxmox host.
+  . /etc/os-release
+  local repo="${ID}${VERSION_ID//./}"  # ubuntu2204, ubuntu2404, debian12, ...
+  local url="https://developer.download.nvidia.com/compute/cuda/repos/$repo/x86_64/cuda-keyring_1.1-1_all.deb"
+  log "Installing the CUDA toolkit (nvcc) from NVIDIA's $repo repo, a few GB"
+  curl -fsSL -o /tmp/cuda-keyring.deb "$url" || die "NVIDIA has no CUDA repo for $repo ($url). \
+Install cuda-toolkit by hand, or use an Ubuntu 22.04/24.04 or Debian 12 container."
+  $SUDO dpkg -i /tmp/cuda-keyring.deb >/dev/null
+  $SUDO apt-get update -qq
+  # 12.8 if the repo has it (works with any driver >= 570); otherwise whatever the repo's newest is.
+  local pkg=cuda-toolkit-12-8
+  apt-cache show "$pkg" >/dev/null 2>&1 || pkg=cuda-toolkit
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$pkg" >/dev/null
+  export PATH="/usr/local/cuda/bin:$PATH"
+  log "nvcc: $(nvcc --version | tail -1)"
+}
+
 cmd_setup() {
   command -v nvidia-smi >/dev/null || die "nvidia-smi not found: is the GPU passed through?"
   nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
@@ -33,17 +51,20 @@ cmd_setup() {
   if bin="$(find_server)"; then
     log "llama-server already installed: $bin"
   else
-    command -v nvcc >/dev/null || [ -x /usr/local/cuda/bin/nvcc ] || die "building llama.cpp with CUDA needs nvcc. \
-Use a CUDA *devel* image (e.g. nvidia/cuda:12.4.1-devel-ubuntu22.04) or install the cuda-toolkit package."
     export PATH="/usr/local/cuda/bin:$PATH"
     if command -v apt-get >/dev/null; then
       log "Installing build tools"
       $SUDO apt-get update -qq
-      $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential cmake git libcurl4-openssl-dev >/dev/null
+      $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential cmake git curl ca-certificates libcurl4-openssl-dev >/dev/null
+      command -v nvcc >/dev/null || install_cuda_toolkit
     fi
+    command -v nvcc >/dev/null || die "building llama.cpp with CUDA needs nvcc. \
+Use a CUDA *devel* image (e.g. nvidia/cuda:12.4.1-devel-ubuntu22.04) or install NVIDIA's cuda-toolkit package."
     [ -d "$LLAMA_DIR" ] || git clone --depth 1 https://github.com/ggml-org/llama.cpp "$LLAMA_DIR"
     log "Building llama.cpp with CUDA (several minutes)"
-    cmake -S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release >/dev/null
+    # native: compile only for the GPU in this box, which is much faster than llama.cpp's default list.
+    cmake -S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_ARCHITECTURES=native >/dev/null
     cmake --build "$LLAMA_DIR/build" --config Release -j "$(nproc)" --target llama-server
     log "Built $LLAMA_DIR/build/bin/llama-server (commit $(git -C "$LLAMA_DIR" rev-parse --short HEAD))"
   fi
