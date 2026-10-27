@@ -180,7 +180,11 @@ function startStage() {
   }
 
   function startCapture(by: "ptt" | "vad") {
-    if (capturing || !link.connected || !mic.running) return;
+    if (capturing) return;
+    if (!link.connected || !mic.running) {
+      if (by === "ptt") log("err", !link.connected ? "can't listen: not connected to the server" : `can't listen: ${micInfo.startsWith("mic unavailable") ? micInfo : "microphone not started, click wake"}`);
+      return;
+    }
     if (by === "ptt" && (conv === "speaking" || conv === "thinking" || out.playing)) {
       // Operator override: hush the ghost and listen.
       out.cancel();
