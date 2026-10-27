@@ -14,6 +14,7 @@ const pct = (db: number) => `${Math.max(0, Math.min(100, ((db + 80) / 80) * 100)
 export class Panel {
   private el = $("panel");
   private autoListen = false;
+  private attractOn = true;
   private talking = false;
   private micDevice = "";
 
@@ -27,6 +28,8 @@ export class Panel {
     talk.addEventListener("pointerup", () => this.ptt(false));
     talk.addEventListener("pointerleave", () => this.ptt(false));
 
+    const attract = $<HTMLInputElement>("attract");
+    attract.addEventListener("change", () => run({ c: "settings", patch: { attract: attract.checked } }));
     const auto = $<HTMLInputElement>("auto-listen");
     auto.addEventListener("change", () => run({ c: "auto", on: auto.checked }));
 
@@ -111,6 +114,10 @@ export class Panel {
     return this.autoListen;
   }
 
+  get attract() {
+    return this.attractOn;
+  }
+
   apply(st: Status) {
     switch (st.s) {
       case "log": {
@@ -183,6 +190,8 @@ export class Panel {
     $<HTMLSelectElement>("s-mic").value = s.micDevice;
     this.autoListen = s.autoListen;
     $<HTMLInputElement>("auto-listen").checked = s.autoListen;
+    this.attractOn = s.attract;
+    $<HTMLInputElement>("attract").checked = s.attract;
     const server = $<HTMLInputElement>("server");
     if (document.activeElement !== server) server.value = s.serverUrl;
   }
@@ -231,6 +240,7 @@ export function bindKeys(panel: Panel, run: (c: Cmd) => void, local: { fullscree
       return run(simple[k]);
     }
     if (k === "v") run({ c: "auto", on: !panel.auto });
+    else if (k === "a") run({ c: "settings", patch: { attract: !panel.attract } });
     else if (k === "o") panel.toggle();
     else if (k === "f") local.fullscreen();
   });

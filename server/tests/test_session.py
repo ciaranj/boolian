@@ -253,3 +253,34 @@ def test_conversation_log_can_be_switched_off(monkeypatch):
     assert load_config().conversation_log == ""
     monkeypatch.delenv("SPECTRE_CONVERSATION_LOG")
     assert load_config().conversation_log.endswith("conversations")
+
+
+async def test_attract_mode_calls_out_when_nobody_is_talking():
+    from app import persona
+
+    convo, rec = make()
+    object.__setattr__(convo.cfg, "attract_s", 45)
+    convo.attract = True
+    convo.touch()
+    await convo.idle_tick()
+    assert not convo.busy  # not yet
+    convo.next_attract -= 100
+    await convo.idle_tick()
+    await finish(convo)
+    said = rec.json[-1]["text"]
+    assert rec.json[-1]["type"] == "reply" and said in {persona.clean_for_speech(line[2]) for line in persona.ATTRACT_LINES}
+    assert not convo.history  # calling out isn't a conversation, so no "still there?" nudges follow
+
+    # Someone answers it: he remembers what he called out, so "a living room!" makes sense.
+    await convo.handle_json({"type": "text", "text": "a living room!"})
+    await finish(convo)
+    assert [m["role"] for m in convo.history] == ["assistant", "user", "assistant"]
+
+
+async def test_operator_can_switch_attract_mode_off():
+    convo, _rec = make()
+    object.__setattr__(convo.cfg, "attract_s", 45)
+    await convo.handle_json({"type": "attract", "on": False})
+    convo.next_attract -= 100
+    await convo.idle_tick()
+    assert not convo.busy

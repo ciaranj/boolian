@@ -47,6 +47,9 @@ class Conversation:
         self.timings: dict[int, TurnTiming] = {}
         self._last_filler = -1
         self.nudges = 0  # prompts said since the visitor last spoke
+        self.attract = cfg.attract_s > 0  # the operator can switch attract mode off
+        self.next_attract = 0.0
+        self.last_attract: tuple[float, str] | None = None  # when, and what he called out
 
         self.listening = False
         self.audio = bytearray()
@@ -100,6 +103,9 @@ class Conversation:
                 await self.cancel("greet")
             emotion, action, text = persona.pick(persona.GREETINGS)
             self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="greeting"))
+        elif kind == "attract":
+            self.attract = bool(msg.get("on")) and self.cfg.attract_s > 0
+            self.touch()
         elif kind == "reset":
             await self.reset("operator")
         elif kind == "cancel":
@@ -136,6 +142,7 @@ class Conversation:
 
     def touch(self) -> None:
         self.last_activity = time.monotonic()
+        self.next_attract = self.last_activity + self.cfg.attract_s * random.uniform(0.6, 1.4)
 
     async def cancel(self, reason: str) -> None:
         old = self.generation
@@ -170,7 +177,14 @@ class Conversation:
     async def idle_tick(self) -> None:
         """If he spoke and nobody answered, ask if they're still there (max_nudges times); if that gets no
         answer either, say goodbye and forget them, so the next group gets a fresh ghost."""
-        if not self.history or self.busy or self.listening:
+        if self.busy or self.listening:
+            return
+        if not self.history:
+            # Nobody to talk to: call out now and then, to draw people over.
+            if self.attract and time.monotonic() > self.next_attract:
+                emotion, action, text = persona.pick(persona.ATTRACT_LINES)
+                self.last_attract = (time.monotonic(), f"{persona.remembered_tag(Expression(emotion, action))} {text}")
+                self._start("attract", lambda gen, t: self._say_turn(gen, t, emotion, action, text, remember=False, source="attract"))
             return
         quiet = time.monotonic() - self.last_activity
         if self.cfg.nudge_s and quiet > self.cfg.nudge_s:
@@ -270,6 +284,10 @@ class Conversation:
 
     async def _llm_turn(self, gen: int, timing: TurnTiming, user_text: str) -> None:
         self.nudges = 0
+        # Answering what he just called out ("I've got riddles!") needs him to remember he said it.
+        if not self.history and self.last_attract and time.monotonic() - self.last_attract[0] < 90:
+            self.history.append({"role": "assistant", "content": self.last_attract[1]})
+        self.last_attract = None
         self.history.append({"role": "user", "content": user_text})
         messages = self._build_messages()
         queue: asyncio.Queue[Sentence | None] = asyncio.Queue()

@@ -54,6 +54,7 @@ class Config:
     idle_reset_s: float
     nudge_s: float
     max_nudges: int
+    attract_s: float
     max_utterance_s: float
     static_dir: str
 
@@ -90,7 +91,8 @@ def load_config() -> Config:
         history_turns=int(_env("HISTORY_TURNS", "30")),  # ~70 tokens each; must fit the LLM context
         idle_reset_s=float(_env("IDLE_RESET_S", "40")),  # only used with nudging off
         nudge_s=float(_env("NUDGE_S", "12")),  # quiet seconds after he speaks before he prompts again; 0 = never
-        max_nudges=int(_env("MAX_NUDGES", "2")),  # "still there?" prompts before he gives up and forgets them
+        max_nudges=int(_env("MAX_NUDGES", "2")),
+        attract_s=float(_env("ATTRACT_S", "45")),  # with nobody to talk to, call out about this often (±40%); 0 = never  # "still there?" prompts before he gives up and forgets them
         max_utterance_s=float(_env("MAX_UTTERANCE_S", "15")),
         static_dir=_env("STATIC_DIR", ""),
     )

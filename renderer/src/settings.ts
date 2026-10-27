@@ -12,6 +12,7 @@ export interface Settings {
   extraLatencyMs: number;
   serverUrl: string;
   autoListen: boolean;
+  attract: boolean; // he calls out now and then while nobody is talking to him
   palette: string;
   micDevice: string; // "" = the system default input
   vad: "silero" | "energy"; // how auto-listen decides someone is talking
@@ -41,6 +42,7 @@ export function loadSettings(): Settings {
     extraLatencyMs: 0,
     serverUrl: defaultServer(),
     autoListen: false,
+    attract: true,
     palette: "spectral",
     micDevice: "",
     vad: "silero",

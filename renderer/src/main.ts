@@ -119,6 +119,8 @@ function startStage() {
       log("dim", "server disconnected");
     } else {
       out.newConnection();
+      sentAttract = null; // a new connection is a new session: tell it
+      sendAttract();
       log("dim", "server connected");
       if (awake) setConv("idle");
     }
@@ -406,6 +408,14 @@ function startStage() {
     return (ACTIONS as readonly string[]).includes(v as string) ? (v as Action) : "none";
   }
 
+  let sentAttract: boolean | null = null;
+  function sendAttract() {
+    if (!link.connected || sentAttract === settings.attract) return;
+    if (sentAttract !== null) log("dim", `attract mode ${settings.attract ? "on" : "off"}`);
+    sentAttract = settings.attract;
+    link.send({ type: "attract", on: settings.attract });
+  }
+
   function applySettings() {
     ghost.settings = { scale: settings.scale, offsetX: settings.offsetX, offsetY: settings.offsetY, glow: settings.glow };
     ghost.palette = paletteOf(q.get("palette") ?? settings.palette);
@@ -413,6 +423,7 @@ function startStage() {
     out.setReverb(settings.reverb);
     out.setFx({ waver: settings.fxWaver, flange: settings.fxFlange, echo: settings.fxEcho, shadow: settings.fxShadow });
     out.extraLatencyMs = settings.extraLatencyMs;
+    sendAttract();
     energyVad.opts.endSilenceMs = settings.vadPauseMs;
     silero?.setOptions({ threshold: settings.vadThreshold, pauseMs: settings.vadPauseMs });
     const want = settings.vad === "silero" && silero ? silero : energyVad;

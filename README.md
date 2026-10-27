@@ -109,7 +109,9 @@ each one costs a little clarity.
 ignored, and why) and what Boolian said back, with his emotion, move and response time. No audio is ever kept. It
 goes to `conversations/YYYY-MM-DD.jsonl` at the top of the repo on the spectre container (gitignored);
 `SPECTRE_CONVERSATION_LOG` sets another directory, or `off`. Read it with
-`server/.venv/bin/python scripts/show_conversations.py [2026-10-31 | --all]`. It will hold children's first names
+`server/.venv/bin/python scripts/show_conversations.py [2026-10-31 | --all] [--summary]`: transcripts, then a
+summary of the night (groups, lines heard and ignored and why, how long replies took, timeouts and fallbacks,
+resets, moves, rude noises, busiest hours). It will hold children's first names
 and chatter, so keep it on the container and delete it when you're done with it.
 
 All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
@@ -138,6 +140,10 @@ All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
   off, but a group of chattering trick-or-treaters still counts as talking. In the operator panel, *Voice
   threshold* sets how sure it must be that it's hearing speech (lower is more sensitive), and *Pause before reply*
   sets how long it waits after they stop. *Detect speech by* switches back to the old loudness-only detector.
+- **Attract mode** (on by default, **A** toggles it): while nobody is talking to him, he calls out every 30–60 s to
+  draw people over ("I've got riddles for anyone brave enough!", the odd fart). If someone answers, he remembers what
+  he called out. `SPECTRE_ATTRACT_S` sets how often (0 = never).
+- He knows a handful of Halloween riddles and a guess-the-creature game, and offers them now and then.
 - **G** greets the group, which helps because kids don't know they can talk to him. **R** forgets the visitor.
   If nobody answers him, he asks if they're still there twice (12 s apart), then says goodbye and forgets them.
 - **1–9** play puppet lines (the raspberry and fart lines below them are click-only), and the "Boolian says" box
@@ -158,6 +164,7 @@ All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
 | X / Esc | stop talking | M | mute |
 | 1–9 | puppet lines | O | operator panel |
 | F | fullscreen | K | projection test pattern |
+| A | attract mode on/off | | |
 | arrows | move ghost | + / - | scale |
 
 Debug and art mode: `?state=speaking&emotion=mischievous&mouth=0.6` freezes a pose without a server, and
