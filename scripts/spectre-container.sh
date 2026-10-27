@@ -6,7 +6,7 @@
 #   scripts/spectre-container.sh add-chatterbox    # optional: install the Chatterbox-Turbo voice too
 #   scripts/spectre-container.sh selftest --compare  # time Kokoro vs Chatterbox, save WAVs to listen to
 #   scripts/spectre-container.sh undo-chatterbox   # put the environment back as it was before add-chatterbox
-#   scripts/spectre-container.sh bench-chatterbox  # Chatterbox speed (--quick: per-token; --decoder: audio decoder)
+#   scripts/spectre-container.sh bench-chatterbox  # Chatterbox speed (--quick, --decoder, --stream)
 #   scripts/spectre-container.sh run        # start the server (port 8765)
 #   scripts/spectre-container.sh service    # install + start a systemd unit so it survives reboots
 #
@@ -107,6 +107,8 @@ SPECTRE_TTS_DEVICE=cuda
 # After `add-chatterbox`: SPECTRE_TTS_BACKEND=chatterbox, and optionally a 10 s+ WAV of the voice to clone
 # (yours, or one you have permission to use). Empty = Chatterbox's built-in voice.
 #SPECTRE_TTS_VOICE_REF=/root/boolian-voice.wav
+# Chatterbox: send each sentence in ~1 s pieces as it's generated (try bench-chatterbox --stream first)
+#SPECTRE_TTS_STREAM=1
 
 SPECTRE_PORT=8765
 # Optional shared secret; then open the page with ?token=...

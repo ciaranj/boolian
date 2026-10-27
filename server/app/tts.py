@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
 from collections.abc import AsyncIterator
@@ -109,7 +110,8 @@ class LocalKokoroTTS(TTSBase):
 
 class ChatterboxTTS(TTSBase):
     """Chatterbox-Turbo in-process (pip `chatterbox-tts`): more natural than Kokoro, clones a reference
-    voice, and performs [laugh]/[sigh]-style sound tags. Not streamed: each sentence is generated whole."""
+    voice, and performs [laugh]/[sigh]-style sound tags. Each sentence is generated whole, unless
+    tts_stream is on, when it's sent in ~1 s pieces as it's generated (see chatterbox_fast)."""
 
     sample_rate = 24_000
     sound_tags = True
@@ -157,6 +159,10 @@ class ChatterboxTTS(TTSBase):
     async def healthy(self) -> bool:
         return self.model is not None
 
+    @staticmethod
+    def _pcm(samples) -> bytes:
+        return (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
+
     def _run(self, text: str) -> bytes:
         if self.cfg.tts_fast:
             from . import chatterbox_fast
@@ -164,21 +170,73 @@ class ChatterboxTTS(TTSBase):
             samples = chatterbox_fast.generate(self.model, text)
         else:
             samples = self.model.generate(text).squeeze(0).detach().cpu().numpy()
-        return (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
+        return self._pcm(samples)
 
     async def synth(self, text: str) -> AsyncIterator[bytes]:
         if self.model is None:
             raise RuntimeError("Chatterbox still loading")
         if not text.strip():
             return
+        if self.cfg.tts_stream and self.cfg.tts_fast:
+            async with contextlib.aclosing(self._synth_streaming(text)) as stream:  # closing us must close it
+                async for pcm in stream:
+                    yield pcm
+            return
         async with self.lock:
-            pcm = await asyncio.to_thread(self._run, text)
+            pcm = await _finish_thread(asyncio.ensure_future(asyncio.to_thread(self._run, text)))
         step = self.CHUNK * 2
         for i in range(0, len(pcm), step):
             yield pcm[i : i + step]
 
+    async def _synth_streaming(self, text: str) -> AsyncIterator[bytes]:
+        """Pieces arrive from the GPU thread as they're decoded; a cancelled reply stops it at the next piece."""
+        import threading
+
+        from . import chatterbox_fast
+
+        loop = asyncio.get_running_loop()
+        pieces: asyncio.Queue[bytes | None] = asyncio.Queue()
+        stop = threading.Event()
+
+        def emit(samples) -> None:
+            if stop.is_set():
+                raise chatterbox_fast.Cancelled
+            loop.call_soon_threadsafe(pieces.put_nowait, self._pcm(samples))
+
+        def run() -> None:
+            try:
+                chatterbox_fast.generate_streaming(self.model, text, emit, stop)
+            except chatterbox_fast.Cancelled:
+                pass
+            finally:
+                loop.call_soon_threadsafe(pieces.put_nowait, None)
+
+        async with self.lock:
+            task = asyncio.ensure_future(asyncio.to_thread(run))
+            try:
+                step = self.CHUNK * 2
+                while (pcm := await pieces.get()) is not None:
+                    for i in range(0, len(pcm), step):
+                        yield pcm[i : i + step]
+                await task  # surfaces errors from the thread
+            finally:
+                stop.set()
+                await _finish_thread(task)
+
     async def aclose(self) -> None:
         pass
+
+
+async def _finish_thread(task: asyncio.Future):
+    """Await a to_thread task, and if we're cancelled meanwhile, still wait for the thread to finish before
+    returning: the lock this runs under must not be released while the GPU is still busy with it (the
+    recorded CUDA graphs share buffers, so two sentences at once would corrupt each other)."""
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        with contextlib.suppress(BaseException):
+            await task
+        raise
 
 
 class MockTTS(TTSBase):

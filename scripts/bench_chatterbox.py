@@ -2,7 +2,8 @@
 each on its own and while the LLM is busy generating (the two containers share the GPU).
 
 Run via `scripts/spectre-container.sh bench-chatterbox` (add --quick for just the correctness checks
-and the per-token cost breakdown, or --decoder for where the audio decoder's time goes).
+and the per-token cost breakdown, --decoder for where the audio decoder's time goes, or --stream to
+compare streamed and whole sentences by ear and check streamed pieces arrive in time).
 """
 
 from __future__ import annotations
@@ -379,6 +380,64 @@ def decoder_profile(model) -> None:
     flow.enabled = True
 
 
+STREAM_LINES = LINES + [
+    "I have been drifting around these halls for a hundred and seventy three years, and in all that time "
+    "nobody has ever brought me a single slice of birthday cake.",
+]
+
+
+@torch.inference_mode()
+def stream_compare(model) -> None:
+    """The same speech tokens and noise, decoded whole and in streamed pieces: WAVs to compare by ear."""
+    from chatterbox.models.s3gen.const import S3GEN_SIL
+    from chatterbox.tts_turbo import punc_norm
+
+    fast = chatterbox_fast
+    print(f"  pieces: first after {fast.STREAM_FIRST} tokens, then every {fast.STREAM_HOP}; "
+          f"{fast.STREAM_HOLD} newest frames held back; {fast.MEL_OVERLAP}-frame crossfade at each join")
+    for i, line in enumerate(STREAM_LINES, 1):
+        text = model.tokenizer(punc_norm(line), return_tensors="pt").input_ids.to(model.device)
+        raw = fast.speech_tokens(model.t3, model.conds.t3, text)
+        final = torch.cat([raw, torch.full((3,), S3GEN_SIL, dtype=raw.dtype, device=raw.device)])
+        whole, streamed = [], []
+        a = fast.StreamDecoder(model, whole.append)
+        b = fast.StreamDecoder(model, streamed.append)
+        b.noise = a.noise  # identical noise, so the only difference is decoding in pieces
+        a.push(final, finalize=True)
+        for k in range(fast.STREAM_FIRST, len(raw), fast.STREAM_HOP):
+            b.push(raw[:k], finalize=False)
+        b.push(final, finalize=True)
+        w, st = np.concatenate(whole), np.concatenate(streamed)
+        n = min(len(w), len(st))
+        err = w[:n] - st[:n]
+        snr = 20 * np.log10(np.sqrt(np.mean(w[:n] ** 2)) / max(np.sqrt(np.mean(err ** 2)), 1e-12))
+        print(f"    {i}: {len(w) / model.sr:4.1f}s in {len(streamed)} pieces | lengths {len(w)} vs {len(st)} samples | "
+              f"largest difference {np.abs(err).max():.3f}, signal-to-difference {snr:4.1f} dB")
+        save(f"/tmp/boolian-stream-{i}-whole.wav", w, model.sr)
+        save(f"/tmp/boolian-stream-{i}-streamed.wav", st, model.sr)
+    print("  saved /tmp/boolian-stream-N-whole.wav and -streamed.wav: listen for clicks or wobbles at the joins")
+
+
+def stream_timing(model, label: str) -> None:
+    """Real streaming: when pieces arrive, and whether each arrives before the one before it finishes playing."""
+    for line in STREAM_LINES:
+        t = time.perf_counter()
+        chatterbox_fast.generate(model, line)
+        whole_ms = (time.perf_counter() - t) * 1000
+
+        arrivals = []
+        t = time.perf_counter()
+        chatterbox_fast.generate_streaming(model, line, lambda s: arrivals.append((time.perf_counter() - t, len(s))))
+        start = arrivals[0][0] + 0.12  # the browser starts playback 120 ms after the first audio
+        played, worst = 0.0, float("inf")
+        for at, samples in arrivals:
+            worst = min(worst, start + played - at)  # >0: arrived before it was needed
+            played += samples / model.sr
+        gap = "no gaps" if worst >= 0 else f"a {-worst * 1000:.0f} ms gap"
+        print(f"  {label}: {played:4.1f}s in {len(arrivals)} pieces | first audio {arrivals[0][0] * 1000:4.0f} ms "
+              f"(whole sentence {whole_ms:5.0f} ms) | tightest margin {worst * 1000:5.0f} ms: {gap}")
+
+
 def original(model, text):
     return model.generate(text).squeeze(0).numpy()
 
@@ -406,6 +465,20 @@ async def main() -> int:
         print(f"  LLM not reachable at {cfg.llm_url}: skipping the busy-GPU runs")
 
     quick = "--quick" in sys.argv[1:]
+    if "--stream" in sys.argv[1:]:
+        chatterbox_fast.prepare(model)
+        for warm in LINES[:2]:
+            chatterbox_fast.generate(model, warm)
+            chatterbox_fast.generate_streaming(model, warm, lambda s: None)
+        print("\n[streaming: whole vs pieces, same tokens and noise]")
+        stream_compare(model)
+        print("\n[streaming: real timings]")
+        await asyncio.to_thread(stream_timing, model, "GPU idle ")
+        if has_llm:
+            async with llm_busy(llm):
+                await asyncio.to_thread(stream_timing, model, "LLM busy ")
+        await llm.aclose()
+        return 0
     if "--decoder" in sys.argv[1:]:
         chatterbox_fast.prepare(model)
         for warm in LINES[:2]:

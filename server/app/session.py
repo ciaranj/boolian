@@ -345,19 +345,22 @@ class Conversation:
                 break
             try:
                 text = item.text if self.tts.sound_tags else persona.strip_sounds(item.text)
-                async for pcm in self.tts.synth(text):
-                    timing.mark("first_tts_chunk_ms")
-                    if not started:
-                        started = True
-                        await self._send(gen, {
-                            "type": "speech_start",
-                            "audio_format": {"codec": "pcm_s16le", "sample_rate": self.tts.sample_rate, "channels": 1},
-                        })
-                    if gen != self.generation:
-                        return spoken
-                    await self._send_bytes(pack_audio_chunk(gen, seq, self.tts.sample_rate, pcm))
-                    seq += 1
-                    timing.mark("first_audio_sent_ms")
+                # aclosing: when a reply is cancelled mid-sentence, the voice must stop (and release the
+                # GPU) now, not whenever the abandoned generator happens to be garbage collected.
+                async with contextlib.aclosing(self.tts.synth(text)) as audio:
+                    async for pcm in audio:
+                        timing.mark("first_tts_chunk_ms")
+                        if not started:
+                            started = True
+                            await self._send(gen, {
+                                "type": "speech_start",
+                                "audio_format": {"codec": "pcm_s16le", "sample_rate": self.tts.sample_rate, "channels": 1},
+                            })
+                        if gen != self.generation:
+                            return spoken
+                        await self._send_bytes(pack_audio_chunk(gen, seq, self.tts.sample_rate, pcm))
+                        seq += 1
+                        timing.mark("first_audio_sent_ms")
             except asyncio.CancelledError:
                 raise
             except Exception as e:

@@ -38,6 +38,7 @@ class Config:
     tts_device: str
     tts_voice_ref: str
     tts_fast: bool
+    tts_stream: bool
     tts_sample_rate: int
 
     ghost_name: str
@@ -70,8 +71,9 @@ def load_config() -> Config:
         tts_voice=_env("TTS_VOICE", "bm_fable"),
         tts_speed=float(_env("TTS_SPEED", "1.0")),
         tts_device=_env("TTS_DEVICE", "auto"),  # in-process voices only: auto | cuda | cpu
-        tts_voice_ref=_env("TTS_VOICE_REF", ""),
-        tts_fast=_env("TTS_FAST", "1") == "1",  # chatterbox only: our faster token loop (0 = the original)  # chatterbox only: a 10 s+ WAV to clone; "" = built-in voice
+        tts_voice_ref=_env("TTS_VOICE_REF", ""),  # chatterbox only: a 10 s+ WAV to clone; "" = built-in voice
+        tts_fast=_env("TTS_FAST", "1") == "1",  # chatterbox only: our faster decoding (0 = the original)
+        tts_stream=_env("TTS_STREAM", "0") == "1",  # chatterbox only, needs tts_fast: send sentences in pieces
         tts_sample_rate=int(_env("TTS_SAMPLE_RATE", "24000")),
         ghost_name=_env("GHOST_NAME", "Boolian"),
         history_turns=int(_env("HISTORY_TURNS", "8")),

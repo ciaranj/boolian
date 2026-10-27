@@ -43,6 +43,21 @@ _graph_broken = False  # set if capture ever fails; we then fall back to the pla
 FLOW_STEP = 64  # flow graphs are recorded for lengths (mel frames) in steps of this
 FLOW_MAX_SPEECH_S = 15  # sentences up to this long (plus the reference clip) get a recorded graph
 
+# Streaming (SPECTRE_TTS_STREAM=1), CosyVoice's recipe for this decoder: each piece re-decodes all speech
+# tokens so far in "not finished" mode (the flow then leaves out the last 3 tokens, which lack lookahead),
+# with one fixed noise draw per sentence so every frame sees the same noise each time it's decoded. Only
+# frames not yet played go to the vocoder, which re-runs a few frames of overlap with its excitation
+# carried across and crossfades them with a Hamming window.
+STREAM_FIRST = 25  # speech tokens before the first piece (25 = 1 s of speech)
+STREAM_HOP = 25  # speech tokens between later pieces
+STREAM_HOLD = 6  # newest mel frames held back from each piece: they change most once more context arrives
+MEL_OVERLAP = 8  # mel frames the vocoder re-runs and crossfades at each join (as CosyVoice)
+SAMPLES_PER_FRAME = 480  # 24 kHz audio, 50 mel frames per second
+
+
+class Cancelled(Exception):
+    """Raised inside the GPU thread to abandon a streaming sentence whose reply was cancelled."""
+
 
 def prepare(model) -> None:
     """Call once after loading: put the watermarker on the GPU.
@@ -287,8 +302,9 @@ def _sample(logits, seen, temperature: float, top_k: int, top_p: float, penalty:
 
 @torch.inference_mode()
 def speech_tokens(t3, t3_cond, text_tokens, graph: bool = True, temperature=0.8, top_k=1000, top_p=0.95,
-                  repetition_penalty=1.2, max_gen_len=1000):
-    """Speech tokens for one sentence. graph=False uses Hugging Face's forward pass (the plain loop)."""
+                  repetition_penalty=1.2, max_gen_len=1000, on_piece=None):
+    """Speech tokens for one sentence. graph=False uses Hugging Face's forward pass (the plain loop).
+    on_piece(tokens so far) is called after STREAM_FIRST tokens and every STREAM_HOP after, unless done."""
     hp = t3.hp
     device = text_tokens.device
     vocab = t3.speech_head.out_features
@@ -316,6 +332,7 @@ def speech_tokens(t3, t3_cond, text_tokens, graph: bool = True, temperature=0.8,
     seen[hp.start_speech_token] = True
     tokens = torch.empty(max_gen_len + 1, dtype=torch.long, device=device)
     n = 0
+    next_piece = STREAM_FIRST
     for i in range(max_gen_len + 1):
         tok = _sample(logits.float()[0], seen, temperature, top_k, top_p, repetition_penalty)
         if i == 0:
@@ -325,6 +342,11 @@ def speech_tokens(t3, t3_cond, text_tokens, graph: bool = True, temperature=0.8,
         n = i + 1
         if n % STOP_CHECK_EVERY == 0 and bool((tokens[:n] == hp.stop_speech_token).any()):
             break
+        if on_piece is not None and n >= next_piece:
+            if bool((tokens[:n] == hp.stop_speech_token).any()):
+                break  # finished: the caller decodes the whole sentence next
+            on_piece(tokens[:n])
+            next_piece += STREAM_HOP
         logits = step(tok)
 
     toks = tokens[:n]
@@ -332,6 +354,89 @@ def speech_tokens(t3, t3_cond, text_tokens, graph: bool = True, temperature=0.8,
     if len(stops):
         toks = toks[: int(stops[0, 0])]
     return toks
+
+
+class StreamDecoder:
+    """Turns a growing list of speech tokens into audio pieces; see the streaming notes at the top."""
+
+    def __init__(self, model, emit):
+        self.model, self.emit = model, emit
+        s3 = model.s3gen
+        self.ratio = s3.flow.token_mel_ratio  # mel frames per speech token
+        self.prompt_tokens = model.conds.gen["prompt_token"].shape[1]  # the reference clip's tokens
+        dev, dt = s3.device, s3.dtype
+        self.noise = torch.randn(1, 80, self.ratio * (self.prompt_tokens + 1100), device=dev, dtype=dt)
+        self.window = torch.hamming_window(2 * MEL_OVERLAP * SAMPLES_PER_FRAME, periodic=False, device=dev, dtype=dt)
+        self.emitted = 0  # mel frames (after the reference clip) already sent to the vocoder
+        self.carry = None  # the vocoder's overlap from the previous piece
+        self.started = False
+
+    def mel(self, toks, finalize: bool):
+        """S3Gen's own flow inference, with our noise for every frame (prompt included)."""
+        from chatterbox.models.s3gen.s3gen import S3Token2Mel
+
+        s3 = self.model.s3gen
+        n = len(toks) if finalize else len(toks) - s3.flow.pre_lookahead_len
+        frames = self.ratio * (self.prompt_tokens + n)  # the flow's length: reference clip + these tokens
+        return S3Token2Mel.forward(s3, speech_tokens=toks, ref_wav=None, ref_sr=None, ref_dict=self.model.conds.gen,
+                                   n_cfm_timesteps=2, finalize=finalize, noised_mels=self.noise[..., :frames])
+
+    def push(self, toks, finalize: bool) -> None:
+        toks = toks[toks < OOV_FROM]
+        if not finalize and len(toks) <= self.model.s3gen.flow.pre_lookahead_len:
+            return
+        mel = self.mel(toks, finalize)
+        upto = mel.shape[2] if finalize else mel.shape[2] - STREAM_HOLD
+        new = mel[:, :, self.emitted:max(upto, self.emitted)]
+        self.emitted = max(upto, self.emitted)
+        if new.shape[2] or (finalize and self.carry is not None):
+            self._vocode(new, finalize)
+
+    def _vocode(self, mel, finalize: bool) -> None:
+        s3 = self.model.s3gen
+        if self.carry is not None:
+            mel = torch.cat([self.carry["mel"], mel], dim=2)
+            source = self.carry["source"]
+        else:
+            source = torch.zeros(1, 1, 0, device=mel.device, dtype=mel.dtype)
+        speech, source = s3.mel2wav.inference(speech_feat=mel, cache_source=source)
+        overlap = MEL_OVERLAP * SAMPLES_PER_FRAME
+        if self.carry is not None:
+            speech[:, :overlap] = speech[:, :overlap] * self.window[:overlap] + self.carry["speech"] * self.window[overlap:]
+        if finalize:
+            self.carry = None
+        else:
+            self.carry = {"mel": mel[:, :, -MEL_OVERLAP:], "source": source[:, :, -overlap:],
+                          "speech": speech[:, -overlap:]}
+            speech = speech[:, :-overlap]
+        if not self.started:  # S3Gen silences and fades in the first 40 ms of a sentence
+            speech[:, : len(s3.trim_fade)] *= s3.trim_fade
+            self.started = True
+        wav = speech.squeeze(0).detach().cpu().numpy()
+        if wav.size:
+            self.emit(self.model.watermarker.apply_watermark(wav, sample_rate=self.model.sr))
+
+
+@torch.inference_mode()
+def generate_streaming(model, text: str, emit, stop=None) -> None:
+    """Like generate(), but calls emit(samples) with each ~1 s piece as soon as it's decoded.
+    Setting `stop` (a threading.Event) abandons the sentence at the next piece."""
+    from chatterbox.models.s3gen.const import S3GEN_SIL
+    from chatterbox.tts_turbo import punc_norm
+
+    text_tokens = model.tokenizer(punc_norm(text), return_tensors="pt", padding=True, truncation=True).input_ids
+    text_tokens = text_tokens.to(model.device)
+    dec = StreamDecoder(model, emit)
+
+    def piece(toks):
+        if stop is not None and stop.is_set():
+            raise Cancelled
+        dec.push(toks, finalize=False)
+
+    graph = str(model.device).startswith("cuda") and not _graph_broken
+    toks = speech_tokens(model.t3, model.conds.t3, text_tokens, graph=graph, on_piece=piece)
+    toks = toks[toks < OOV_FROM]
+    dec.push(torch.cat([toks, torch.full((3,), S3GEN_SIL, dtype=toks.dtype, device=toks.device)]), finalize=True)
 
 
 @torch.inference_mode()
