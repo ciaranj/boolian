@@ -251,7 +251,7 @@ class Conversation:
         queue.put_nowait(None)
         spoken = await self._speak(gen, timing, queue)
         if remember and spoken:
-            self.history.append({"role": "assistant", "content": f"[{tag.emotion}:{tag.action}] " + " ".join(spoken)})
+            self.history.append({"role": "assistant", "content": f"{persona.remembered_tag(tag)} " + " ".join(spoken)})
         await self._send(gen, {"type": "reply", "text": " ".join(spoken)})
 
     async def _llm_turn(self, gen: int, timing: TurnTiming, user_text: str) -> None:
@@ -296,7 +296,7 @@ class Conversation:
             for ev in events:
                 if isinstance(ev, Expression):
                     if reply["tag"] is None:
-                        reply["tag"] = f"[{ev.emotion}:{ev.action}]"
+                        reply["tag"] = persona.remembered_tag(ev)
                     await self._send_expression(gen, ev)
                     continue
                 if persona.is_unsafe(ev.text):
