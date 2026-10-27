@@ -11,14 +11,21 @@ import httpx
 import numpy as np
 
 from .config import Config
+from .persona import FILLER_LINES
 
 log = logging.getLogger(__name__)
 
 
-class KokoroTTS:
-    """Kokoro-FastAPI's OpenAI-compatible /audio/speech endpoint, streaming raw PCM."""
+class TTSBase:
+    """What the session needs to know about a voice beyond synth()."""
 
-    sound_tags = False
+    sound_tags = False  # can perform [laugh]-style tags (otherwise they're stripped)
+    whole_sentences = False  # generates each chunk whole, so a short first chunk gets him talking sooner
+    fillers: list[bytes] = []  # pre-made reaction noises played while a slow voice prepares the reply
+
+
+class KokoroTTS(TTSBase):
+    """Kokoro-FastAPI's OpenAI-compatible /audio/speech endpoint, streaming raw PCM."""
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -56,11 +63,10 @@ class KokoroTTS:
         await self.client.aclose()
 
 
-class LocalKokoroTTS:
+class LocalKokoroTTS(TTSBase):
     """Kokoro running inside this process (pip `kokoro`), so no separate TTS service is needed."""
 
     sample_rate = 24_000
-    sound_tags = False
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -101,18 +107,20 @@ class LocalKokoroTTS:
         pass
 
 
-class ChatterboxTTS:
+class ChatterboxTTS(TTSBase):
     """Chatterbox-Turbo in-process (pip `chatterbox-tts`): more natural than Kokoro, clones a reference
     voice, and performs [laugh]/[sigh]-style sound tags. Not streamed: each sentence is generated whole."""
 
     sample_rate = 24_000
     sound_tags = True
+    whole_sentences = True
     CHUNK = 24_000 // 4  # samples per message (250 ms)
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.model = None
         self.lock = asyncio.Lock()  # one synthesis at a time on the GPU
+        self.fillers = []
 
     async def load(self) -> None:
         import torch
@@ -127,7 +135,20 @@ class ChatterboxTTS:
             await asyncio.to_thread(self.model.prepare_conditionals, self.cfg.tts_voice_ref)
         self.sample_rate = self.model.sr
         await asyncio.to_thread(self._run, "Hello there.")  # warm-up
-        log.info("Chatterbox ready")
+        self.fillers = await asyncio.to_thread(self._make_fillers)
+        log.info("Chatterbox ready (%d reaction noises)", len(self.fillers))
+
+    def _make_fillers(self) -> list[bytes]:
+        # Very short prompts occasionally make the model ramble on; keep only ones that came out short.
+        fillers = []
+        for text in FILLER_LINES:
+            pcm = self._run(text)
+            secs = len(pcm) / 2 / self.sample_rate
+            if 0.2 <= secs <= 1.8:
+                fillers.append(pcm)
+            else:
+                log.info("dropped reaction noise %r (%.1fs)", text, secs)
+        return fillers
 
     async def healthy(self) -> bool:
         return self.model is not None
@@ -152,7 +173,7 @@ class ChatterboxTTS:
         pass
 
 
-class MockTTS:
+class MockTTS(TTSBase):
     """Ghostly babble: one warbling vowel per syllable, so the mouth has something to chew on."""
 
     sample_rate = 24_000
@@ -187,7 +208,7 @@ class MockTTS:
         pass
 
 
-def make_tts(cfg: Config) -> KokoroTTS | LocalKokoroTTS | ChatterboxTTS | MockTTS:
+def make_tts(cfg: Config) -> TTSBase:
     if cfg.tts_backend == "mock":
         return MockTTS()
     if cfg.tts_backend == "kokoro-local":

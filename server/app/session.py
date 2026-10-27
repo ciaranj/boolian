@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -38,6 +39,7 @@ class Conversation:
         self.generation = 0
         self.task: asyncio.Task | None = None
         self.timings: dict[int, TurnTiming] = {}
+        self._last_filler = -1
 
         self.listening = False
         self.audio = bytearray()
@@ -230,7 +232,8 @@ class Conversation:
         reply: dict = {"tag": None}
         producer = asyncio.create_task(self._produce(gen, timing, messages, queue, reply))
         try:
-            spoken = await self._speak(gen, timing, queue, first_timeout=self.cfg.llm_first_sentence_timeout_s)
+            spoken = await self._speak(gen, timing, queue, first_timeout=self.cfg.llm_first_sentence_timeout_s,
+                                       filler=self._pick_filler())
         finally:
             producer.cancel()
         if spoken:
@@ -252,7 +255,7 @@ class Conversation:
         return [{"role": "system", "content": persona.system_prompt(self.cfg.ghost_name, sounds=self.tts.sound_tags)}, *turns]
 
     async def _produce(self, gen: int, timing: TurnTiming, messages: list[dict], queue: asyncio.Queue, reply: dict) -> None:
-        parser = ReplyParser()
+        parser = ReplyParser(eager_first=self.tts.whole_sentences)
         sentences = 0
 
         async def handle(events: list[Expression | Sentence]) -> bool:
@@ -298,12 +301,32 @@ class Conversation:
         finally:
             queue.put_nowait(None)
 
-    async def _speak(self, gen: int, timing: TurnTiming, queue: asyncio.Queue, first_timeout: float | None = None) -> list[str]:
-        """Synthesise queued sentences in order and stream them to the presenter."""
+    def _pick_filler(self) -> bytes | None:
+        fillers = self.tts.fillers
+        if not fillers:
+            return None
+        choices = [i for i in range(len(fillers)) if i != self._last_filler] or [0]
+        self._last_filler = random.choice(choices)
+        return fillers[self._last_filler]
+
+    async def _speak(self, gen: int, timing: TurnTiming, queue: asyncio.Queue, first_timeout: float | None = None,
+                     filler: bytes | None = None) -> list[str]:
+        """Synthesise queued sentences in order and stream them to the presenter.
+
+        A filler (pre-made reaction noise) plays first, while the real reply is still being made."""
         spoken: list[str] = []
         seq = 0
         started = False
         stop_after = False
+        if filler:
+            started = await self._send(gen, {
+                "type": "speech_start",
+                "audio_format": {"codec": "pcm_s16le", "sample_rate": self.tts.sample_rate, "channels": 1},
+            })
+            step = self.tts.sample_rate // 4 * 2  # 250 ms per message, like the voices
+            for i in range(0, len(filler) if started else 0, step):
+                await self._send_bytes(pack_audio_chunk(gen, seq, self.tts.sample_rate, filler[i : i + step]))
+                seq += 1
         while not stop_after:
             if first_timeout is not None and not spoken:
                 try:

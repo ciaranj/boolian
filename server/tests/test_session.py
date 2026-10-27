@@ -99,3 +99,46 @@ async def test_messages_alternate_after_greeting():
     convo.history.append({"role": "user", "content": "hi"})
     roles = [m["role"] for m in convo._build_messages()]
     assert roles == ["system", "user", "assistant", "user"]
+
+
+class SlowVoice(MockTTS):
+    """Stands in for Chatterbox: has reaction noises and wants an eager first chunk."""
+
+    whole_sentences = True
+    fillers = [b"\x01\x00" * 18_000, b"\x02\x00" * 6_000]  # 0.75 s and 0.25 s
+
+    def __init__(self):
+        self.texts = []
+
+    async def synth(self, text):
+        self.texts.append(text)
+        async for pcm in super().synth(text):
+            yield pcm
+
+
+async def test_slow_voice_reacts_instantly_then_speaks_a_short_first_chunk():
+    class Witch(MockLLM):
+        async def stream(self, messages, max_tokens=None):
+            for tok in ["[happy:bounce] ", "A ", "witch! ", "That is a marvellous costume. ", "Boo!"]:
+                yield tok
+
+    rec = Recorder()
+    tts = SlowVoice()
+    convo = Conversation(load_config(), MockSTT(), Witch(), tts, Metrics(), rec.send_json, rec.send_bytes)
+    await convo.handle_json({"type": "text", "text": "I'm a witch"})
+    await finish(convo)
+    types = rec.types()
+    # The reaction goes out before the LLM's tag even arrives, as the start of the same audio stream.
+    assert types.index("speech_start") < types.index("expression") < types.index("speech_end")
+    assert types.count("speech_start") == 1
+    assert tts.texts[0] == "A witch!"  # under MIN_SENTENCE, but first chunks are eager for this voice
+    assert [seq for _gen, seq in rec.audio] == list(range(len(rec.audio)))
+    # The filler isn't part of what he "said".
+    assert convo.history[-1]["content"] == "[happy:bounce] A witch! That is a marvellous costume. Boo!"
+
+
+async def test_fast_voice_has_no_filler():
+    convo, rec = make()
+    await convo.handle_json({"type": "text", "text": "hello"})
+    await finish(convo)
+    assert rec.types().index("expression") < rec.types().index("speech_start")

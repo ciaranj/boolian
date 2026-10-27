@@ -62,6 +62,9 @@ FALLBACK_LINES = [
     ("mischievous", "none", "Oops, my brain went all misty for a moment. Ask me something else?"),
 ]
 
+# Said the instant a visitor stops talking, while a slow voice prepares the real reply.
+FILLER_LINES = ["Ooooh!", "Hmm, ooh...", "[chuckle] Ooh!", "Hmmm...", "Ooh, ooh!"]
+
 SAFE_REDIRECT = ("happy", "spin", "Ooh, let's talk about something more fun. What's your favourite Halloween sweet?")
 
 
@@ -131,8 +134,12 @@ class ReplyParser:
     MIN_SENTENCE = 12
     LONG_CLAUSE = 110
     FIRST_CLAUSE = 20  # the first chunk may end at a comma, so speech starts a few tokens sooner
+    EAGER_FIRST = 4  # with eager_first, even "Boo!" can be the first chunk
 
-    def __init__(self) -> None:
+    def __init__(self, eager_first: bool = False) -> None:
+        """eager_first: let a very short opening sentence be its own chunk (for voices that
+        generate each chunk whole, where the first chunk's length is the wait before he speaks)."""
+        self._eager_first = eager_first
         self._buf = ""
         self._tag_done = False
         self._started = False
@@ -188,8 +195,9 @@ class ReplyParser:
         out: list[Expression | Sentence] = []
         while True:
             cut = None
+            min_len = self.EAGER_FIRST if self._eager_first and not self._started else self.MIN_SENTENCE
             for m in _SENTENCE_END.finditer(self._buf):
-                if m.end() >= self.MIN_SENTENCE:
+                if m.end() >= min_len:
                     cut = m.end()
                     break
             if cut is None and len(self._buf) > self.LONG_CLAUSE:
