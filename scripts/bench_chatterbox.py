@@ -99,6 +99,35 @@ async def timed(label: str, fn, model, busy_llm: OpenAICompatLLM | None, tag: st
     return rate
 
 
+def profile(model, label: str) -> None:
+    """Where one sentence's time goes, stage by stage (fast token loop)."""
+    from chatterbox.models.s3gen.const import S3GEN_SIL
+    from chatterbox.tts_turbo import punc_norm
+
+    def now():
+        torch.cuda.synchronize()
+        return time.monotonic()
+
+    for line in LINES:
+        t0 = now()
+        text_tokens = model.tokenizer(punc_norm(line), return_tensors="pt", padding=True, truncation=True).input_ids
+        text_tokens = text_tokens.to(model.device)
+        t1 = now()
+        toks = chatterbox_fast.speech_tokens(model.t3, model.conds.t3, text_tokens)
+        t2 = now()
+        toks = torch.cat([toks[toks < chatterbox_fast.OOV_FROM], torch.full((3,), S3GEN_SIL, device=toks.device)])
+        with torch.inference_mode():
+            wav, _ = model.s3gen.inference(speech_tokens=toks, ref_dict=model.conds.gen, n_cfm_timesteps=2)
+        t3 = now()
+        wav = wav.squeeze(0).detach().cpu().numpy()
+        model.watermarker.apply_watermark(wav, sample_rate=model.sr)
+        t4 = now()
+        n = len(toks)
+        print(f"  {label}: {len(wav) / model.sr:4.1f}s audio | tokenise {(t1 - t0) * 1000:4.0f} ms | "
+              f"tokens {(t2 - t1) * 1000:5.0f} ms ({n} @ {n / (t2 - t1):.0f}/s) | "
+              f"decoder {(t3 - t2) * 1000:4.0f} ms | watermark {(t4 - t3) * 1000:4.0f} ms")
+
+
 def original(model, text):
     return model.generate(text).squeeze(0).numpy()
 
@@ -107,7 +136,10 @@ async def main() -> int:
     from chatterbox.tts_turbo import ChatterboxTurboTTS
 
     cfg = load_config()
-    print("[sampler] ours vs Hugging Face's logits processors")
+    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+    print(f"[machine] {torch.cuda.get_device_name()}, {cores} CPU cores available, torch {torch.__version__}, "
+          f"{torch.get_num_threads()} torch threads")
+    print("\n[sampler] ours vs Hugging Face's logits processors")
     if not check_sampler():
         print("FAILED: the fast sampler doesn't match; not benchmarking it")
         return 1
@@ -133,6 +165,12 @@ async def main() -> int:
     chatterbox_fast.prepare(model)  # converts the transformer to bf16; the original loop can't run after this
     for warm in LINES[:2]:
         chatterbox_fast.generate(model, warm)
+    print("\n[where the time goes, fast loop]")
+    chatterbox_fast.watermarker_to(model, "cpu")
+    profile(model, "watermark on CPU")
+    chatterbox_fast.watermarker_to(model, model.device)
+    model.watermarker.apply_watermark(np.zeros(24_000, dtype=np.float32), sample_rate=model.sr)  # warm-up
+    profile(model, "watermark on GPU")
     print(f"\n[fast loop] transformer dtype {model.t3.tfmr.dtype}")
     results["fast"] = await timed("fast", chatterbox_fast.generate, model, None, "fast")
     if has_llm:

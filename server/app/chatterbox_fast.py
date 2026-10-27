@@ -19,10 +19,22 @@ OOV_FROM = 6561  # speech tokens at or above this (start/stop) aren't audio, as 
 
 
 def prepare(model) -> None:
-    """Call once after loading: keep a bf16 transformer if the GPU supports it."""
+    """Call once after loading: bf16 transformer, and the watermarker on the GPU.
+
+    Chatterbox builds its (Resemble Perth) watermarker on the CPU, where it runs a neural network
+    over every sentence. Moving it to the GPU keeps the watermark, it just stops costing CPU time."""
+    if not str(model.device).startswith("cuda"):
+        return
     tfmr = model.t3.tfmr
-    if str(model.device).startswith("cuda") and torch.cuda.is_bf16_supported() and tfmr.dtype != torch.bfloat16:
+    if torch.cuda.is_bf16_supported() and tfmr.dtype != torch.bfloat16:
         tfmr.to(torch.bfloat16)
+    watermarker_to(model, model.device)
+
+
+def watermarker_to(model, device) -> None:
+    import perth
+
+    model.watermarker = perth.PerthImplicitWatermarker(device=device)
 
 
 def filtered(logits, seen, temperature: float, top_k: int, top_p: float, penalty: float):
