@@ -55,7 +55,7 @@ cmd_setup() {
     if command -v apt-get >/dev/null; then
       log "Installing build tools"
       $SUDO apt-get update -qq
-      $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential cmake git curl ca-certificates libcurl4-openssl-dev >/dev/null
+      $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential cmake git curl ca-certificates libcurl4-openssl-dev libssl-dev >/dev/null
       command -v nvcc >/dev/null || install_cuda_toolkit
     fi
     command -v nvcc >/dev/null || die "building llama.cpp with CUDA needs nvcc. \
@@ -63,7 +63,7 @@ Use a CUDA *devel* image (e.g. nvidia/cuda:12.4.1-devel-ubuntu22.04) or install 
     [ -d "$LLAMA_DIR" ] || git clone --depth 1 https://github.com/ggml-org/llama.cpp "$LLAMA_DIR"
     log "Building llama.cpp with CUDA (several minutes)"
     # native: compile only for the GPU in this box, which is much faster than llama.cpp's default list.
-    cmake -S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
+    cmake -S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DGGML_CUDA=ON -DLLAMA_CURL=ON -DLLAMA_OPENSSL=ON -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_CUDA_ARCHITECTURES=native >/dev/null
     cmake --build "$LLAMA_DIR/build" --config Release -j "$(nproc)" --target llama-server
     log "Built $LLAMA_DIR/build/bin/llama-server (commit $(git -C "$LLAMA_DIR" rev-parse --short HEAD))"
