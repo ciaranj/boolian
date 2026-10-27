@@ -45,7 +45,7 @@ Two containers with the GPU passed through, each with a clone of this repo:
 | **spectre** | Spectre on :8765, with Whisper and Kokoro in-process | `scripts/spectre-container.sh setup`, then `selftest`, then `run` (or `service`) |
 
 - `llm-container.sh setup` reuses an existing `llama-server`, or builds llama.cpp with CUDA. Building needs `nvcc`,
-  so use a CUDA *devel* image. The model is set in `llm.env`: by default Llama 3.1 8B Q4_K_M, downloaded from
+  so use a CUDA *devel* image. The model is set in `llm.env`: by default Gemma 4 12B (4-bit, ~7.5 GB), downloaded from
   Hugging Face on first run. Set `LLM_MODEL=/path/model.gguf` to use a local file.
 - `spectre-container.sh setup` installs espeak-ng, uv, Python 3.12, PyTorch (CUDA), faster-whisper and Kokoro,
   then writes `spectre.env`. **Edit `SPECTRE_LLM_URL`** to point at the llm container.

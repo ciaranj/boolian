@@ -6,7 +6,7 @@
 #   scripts/llm-container.sh service   # install + start a systemd unit
 #
 # Choose the model with either (env vars or llm.env next to this repo's root):
-#   LLM_HF=bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M   # downloaded from Hugging Face on first run
+#   LLM_HF=unsloth/gemma-4-12b-it-GGUF:UD-Q4_K_XL   # downloaded from Hugging Face on first run
 #   LLM_MODEL=/models/some-model.gguf                          # a local GGUF file (takes precedence)
 set -euo pipefail
 
@@ -72,8 +72,9 @@ Use a CUDA *devel* image (e.g. nvidia/cuda:12.4.1-devel-ubuntu22.04) or install 
   if [ ! -f "$ENV_FILE" ]; then
     log "Writing $ENV_FILE"
     cat >"$ENV_FILE" <<'EOF'
-# Model for Boolian. 8B fits easily in 16 GB and stays in character better than 3B.
-LLM_HF=bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M
+# Model for Boolian. Gemma 4 12B at 4-bit is ~7.5 GB, leaving room on a 16 GB card for Whisper + Kokoro.
+# Bigger (e.g. unsloth/gemma-4-26B-A4B-it-GGUF) only fits if this GPU isn't shared with the spectre container.
+LLM_HF=unsloth/gemma-4-12b-it-GGUF:UD-Q4_K_XL
 # Or a local file (wins over LLM_HF):
 #LLM_MODEL=/models/model.gguf
 LLM_PORT=8080
@@ -89,12 +90,14 @@ cmd_run() {
   bin="$(find_server)" || die "llama-server not found: run '$0 setup'"
   local model_args
   if [ -n "${LLM_MODEL:-}" ]; then model_args=(-m "$LLM_MODEL")
-  else model_args=(-hf "${LLM_HF:-bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M}")
+  else model_args=(-hf "${LLM_HF:-unsloth/gemma-4-12b-it-GGUF:UD-Q4_K_XL}")
   fi
   log "Serving ${model_args[1]} on 0.0.0.0:${LLM_PORT:-8080}"
   # --parallel 1: one conversation at a time, all the KV cache for it. --jinja: model's own chat template.
+  # No thinking (a reasoning preamble would cost seconds per reply) and no vision projector (wasted VRAM).
   exec "$bin" "${model_args[@]}" --host 0.0.0.0 --port "${LLM_PORT:-8080}" \
-    -ngl 99 -c "${LLM_CTX:-4096}" --parallel 1 --jinja
+    -ngl 99 -c "${LLM_CTX:-4096}" --parallel 1 --jinja --no-mmproj \
+    --chat-template-kwargs '{"enable_thinking":false}'
 }
 
 cmd_service() {
