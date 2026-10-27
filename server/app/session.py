@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from . import noises, persona
+from .convolog import ConversationLog, new_id
 from .config import Config
 from .metrics import Metrics, TurnTiming
 from .persona import Expression, ReplyParser, Sentence
@@ -30,8 +31,12 @@ MAX_SENTENCES = 4
 
 
 class Conversation:
-    def __init__(self, cfg: Config, stt, llm, tts, metrics: Metrics, send_json: SendJson, send_bytes: SendBytes) -> None:
+    def __init__(self, cfg: Config, stt, llm, tts, metrics: Metrics, send_json: SendJson, send_bytes: SendBytes,
+                 convo_log: ConversationLog | None = None) -> None:
         self.cfg = cfg
+        self.convo_log = convo_log or ConversationLog(None)
+        self.conn = new_id()  # this browser connection
+        self.convo = new_id()  # this visitor group; renewed whenever he forgets them
         self.stt, self.llm, self.tts = stt, llm, tts
         self.metrics = metrics
         self._send_json, self._send_bytes = send_json, send_bytes
@@ -55,6 +60,7 @@ class Conversation:
     async def handle_json(self, msg: dict) -> None:
         kind = msg.get("type")
         if kind == "hello":
+            self._log("connect", client=str(msg.get("client", "")))
             await self._send_json({
                 "v": 1, "type": "welcome", "ghost_name": self.cfg.ghost_name,
                 "backends": {"stt": self.cfg.stt_backend, "llm": self.cfg.llm_backend, "tts": self.cfg.tts_backend},
@@ -88,12 +94,12 @@ class Conversation:
                 if self.busy:
                     await self.cancel("puppet")
                 emotion, action = str(msg.get("emotion", "neutral")), str(msg.get("action", "none"))
-                self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text))
+                self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="puppet"))
         elif kind == "greet":
             if self.busy:
                 await self.cancel("greet")
             emotion, action, text = persona.pick(persona.GREETINGS)
-            self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text))
+            self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="greeting"))
         elif kind == "reset":
             await self.reset("operator")
         elif kind == "cancel":
@@ -135,6 +141,7 @@ class Conversation:
         old = self.generation
         if self.task and not self.task.done():
             self.task.cancel()
+            self._log("cancelled", reason=reason)
         self.generation += 1  # anything still in flight for `old` is now stale
         if (t := self.timings.pop(old, None)) is not None:
             t.outcome = f"cancelled:{reason}"
@@ -150,6 +157,8 @@ class Conversation:
     async def _forget(self, reason: str) -> None:
         self.history.clear()
         self.nudges = 0
+        self._log("reset", reason=reason)
+        self.convo = new_id()
         await self._send_json({"v": 1, "type": "session_reset", "reason": reason})
         log.info("session reset (%s)", reason)
 
@@ -170,7 +179,7 @@ class Conversation:
                 emotion, action, text = persona.pick(persona.NUDGE_LINES)
                 log.info("nobody answered; nudge %d", self.nudges)
                 # Not remembered: the LLM should carry on from the conversation, not from the prompting.
-                self._start("nudge", lambda gen, t: self._say_turn(gen, t, emotion, action, text, remember=False))
+                self._start("nudge", lambda gen, t: self._say_turn(gen, t, emotion, action, text, remember=False, source="nudge"))
             else:
                 emotion, action, text = persona.pick(persona.LONELY_LINES)
                 log.info("nobody answered %d nudges; giving up", self.nudges)
@@ -179,7 +188,7 @@ class Conversation:
             await self.reset("idle")
 
     async def _give_up(self, gen: int, timing: TurnTiming, emotion: str, action: str, text: str) -> None:
-        await self._say_turn(gen, timing, emotion, action, text, remember=False)
+        await self._say_turn(gen, timing, emotion, action, text, remember=False, source="giving_up")
         if gen == self.generation:  # nobody spoke up while he was saying it
             await self._forget("nobody there")
 
@@ -222,10 +231,12 @@ class Conversation:
             "duration_s": round(tr.duration_s, 2), "avg_logprob": round(tr.avg_logprob, 2),
             "no_speech_prob": round(tr.no_speech_prob, 2),
         })
+        if tr.text.strip():  # ignored ones too ("rejected" says why): useful for tuning
+            self._log("visitor", text=tr.text, via="voice", rejected=tr.rejected)
         if tr.rejected == "low_confidence":
             timing.outcome = "asked_repeat"
             emotion, action, line = persona.pick(persona.REPEAT_LINES)
-            await self._say_turn(gen, timing, emotion, action, line, remember=False)
+            await self._say_turn(gen, timing, emotion, action, line, remember=False, source="asked_repeat")
             return
         if tr.rejected:
             timing.outcome = f"ignored:{tr.rejected}"
@@ -236,9 +247,11 @@ class Conversation:
     async def _text_turn(self, gen: int, timing: TurnTiming, text: str) -> None:
         await self._send(gen, {"type": "state", "state": "thinking"})
         await self._send(gen, {"type": "transcript", "text": text, "rejected": None, "typed": True})
+        self._log("visitor", text=text, via="typed", rejected=None)
         await self._llm_turn(gen, timing, text)
 
-    async def _say_turn(self, gen: int, timing: TurnTiming, emotion: str, action: str, text: str, remember: bool = True) -> None:
+    async def _say_turn(self, gen: int, timing: TurnTiming, emotion: str, action: str, text: str, remember: bool = True,
+                        source: str = "canned") -> None:
         tag = persona.parse_tag(f"[{emotion}:{action}]")
         parser = ReplyParser()
         events = parser.feed(f"[{tag.emotion}:{tag.action}] {text}") + parser.finish()
@@ -252,6 +265,7 @@ class Conversation:
         spoken = await self._speak(gen, timing, queue)
         if remember and spoken:
             self.history.append({"role": "assistant", "content": f"{persona.remembered_tag(tag)} " + " ".join(spoken)})
+        self._log_reply(timing, " ".join(spoken), tag.emotion, tag.action, source)
         await self._send(gen, {"type": "reply", "text": " ".join(spoken)})
 
     async def _llm_turn(self, gen: int, timing: TurnTiming, user_text: str) -> None:
@@ -270,10 +284,20 @@ class Conversation:
             self.history.append({"role": "assistant", "content": f"{reply['tag'] or '[neutral]'} " + " ".join(spoken)})
         elif self.history and self.history[-1]["role"] == "user":
             self.history.pop()
+        tag = persona.parse_tag(reply["tag"] or "[neutral]")
+        self._log_reply(timing, " ".join(spoken), tag.emotion, tag.action, "llm" if timing.outcome == "ok" else timing.outcome)
         await self._send(gen, {"type": "reply", "text": " ".join(spoken)})
         if persona.is_goodbye(user_text) and gen == self.generation:
             # He's already said goodbye back; forget them without cutting that off.
             await self._forget("goodbye")
+
+    def _log(self, kind: str, **fields) -> None:
+        self.convo_log.write({"conn": self.conn, "convo": self.convo, "kind": kind, **fields})
+
+    def _log_reply(self, timing: TurnTiming, text: str, emotion: str, action: str, source: str) -> None:
+        if text:
+            self._log("ghost", text=text, emotion=emotion, action=action, source=source,
+                      latency_ms=timing.first_audio_sent_ms)
 
     def _build_messages(self) -> list[dict]:
         # Some chat templates (Gemma) insist on strict user/assistant alternation starting with user.

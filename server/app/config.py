@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+
+def _conversation_log() -> str:
+    """SPECTRE_CONVERSATION_LOG: a directory, or "off". Defaults to conversations/ at the top of the repo."""
+    value = _env("CONVERSATION_LOG", str(Path(__file__).resolve().parents[2] / "conversations"))
+    return "" if value.lower() in ("", "off", "0", "none") else value
 
 
 def _env(name: str, default: str) -> str:
@@ -15,6 +22,7 @@ class Config:
     host: str
     port: int
     auth_token: str
+    conversation_log: str  # directory for the text log of every conversation; "" = don't keep one
 
     # "mock" swaps every backend for a fake so the whole loop runs on a laptop.
     stt_backend: str
@@ -56,6 +64,7 @@ def load_config() -> Config:
         host=_env("HOST", "0.0.0.0"),
         port=int(_env("PORT", "8765")),
         auth_token=_env("AUTH_TOKEN", ""),
+        conversation_log=_conversation_log(),
         stt_backend="mock" if mock else _env("STT_BACKEND", "faster-whisper"),
         stt_model=_env("STT_MODEL", "large-v3-turbo"),
         stt_device=_env("STT_DEVICE", "cuda"),

@@ -11,3 +11,4 @@ infra/models/
 *.egg-info/
 spectre.env
 llm.env
+conversations/

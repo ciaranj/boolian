@@ -105,6 +105,13 @@ more ghostly effects are off by default: *Waver* (a slow, drifting pitch wobble)
 *Echo* (darkening repeats) and *Shadow voice* (a quiet second voice an octave below). Try them on the real speaker;
 each one costs a little clarity.
 
+**Conversation log.** The server keeps a text log of every conversation: what visitors said (including what it
+ignored, and why) and what Boolian said back, with his emotion, move and response time. No audio is ever kept. It
+goes to `conversations/YYYY-MM-DD.jsonl` at the top of the repo on the spectre container (gitignored);
+`SPECTRE_CONVERSATION_LOG` sets another directory, or `off`. Read it with
+`server/.venv/bin/python scripts/show_conversations.py [2026-10-31 | --all]`. It will hold children's first names
+and chatter, so keep it on the container and delete it when you're done with it.
+
 All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
 `SPECTRE_AUTH_TOKEN` enables a shared token: append `?token=…` to the page URL.
 

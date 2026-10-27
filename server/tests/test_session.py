@@ -219,3 +219,37 @@ async def test_rude_noise_is_one_flagged_chunk_in_the_speech():
     assert 0 < flagged[0] < len(rec.flags) - 1  # with speech either side of it
     assert [s for _, s in rec.audio] == list(range(len(rec.audio)))
     assert "[fart]" in rec.json[-1]["text"]  # he remembers doing it
+
+
+async def test_conversations_are_logged_as_text(tmp_path):
+    import json
+
+    from app.convolog import ConversationLog
+
+    rec = Recorder()
+    convo = Conversation(load_config(), MockSTT(), MockLLM(), MockTTS(), Metrics(), rec.send_json, rec.send_bytes,
+                         ConversationLog(tmp_path))
+    await convo.handle_json({"type": "hello", "client": "renderer"})
+    await convo.handle_json({"type": "greet"})
+    await finish(convo)
+    await convo.handle_json({"type": "text", "text": "I'm a witch"})
+    await finish(convo)
+    first = convo.convo
+    await convo.handle_json({"type": "reset"})
+    await convo.handle_json({"type": "text", "text": "hello again"})
+    await finish(convo)
+
+    [day] = list(tmp_path.glob("*.jsonl"))
+    records = [json.loads(line) for line in day.read_text().splitlines()]
+    assert [r["kind"] for r in records] == ["connect", "ghost", "visitor", "ghost", "reset", "visitor", "ghost"]
+    assert records[1]["source"] == "greeting" and records[2]["text"] == "I'm a witch" and records[3]["source"] == "llm"
+    assert records[4]["reason"] == "operator" and records[4]["convo"] == first
+    assert records[5]["convo"] != first  # the next group is a new conversation
+    assert len({r["conn"] for r in records}) == 1 and all(r["ts"] for r in records)
+
+
+def test_conversation_log_can_be_switched_off(monkeypatch):
+    monkeypatch.setenv("SPECTRE_CONVERSATION_LOG", "off")
+    assert load_config().conversation_log == ""
+    monkeypatch.delenv("SPECTRE_CONVERSATION_LOG")
+    assert load_config().conversation_log.endswith("conversations")

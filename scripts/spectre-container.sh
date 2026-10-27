@@ -104,6 +104,8 @@ SPECTRE_STT_COMPUTE_TYPE=float16
 SPECTRE_TTS_BACKEND=kokoro-local
 SPECTRE_TTS_VOICE=bm_fable
 SPECTRE_TTS_DEVICE=cuda
+# A text log of every conversation goes to conversations/ in the repo; set to "off" to keep none
+#SPECTRE_CONVERSATION_LOG=/root/boolian-conversations
 # After `add-chatterbox`: SPECTRE_TTS_BACKEND=chatterbox, and optionally a 10 s+ WAV of the voice to clone
 # (yours, or one you have permission to use). Empty = Chatterbox's built-in voice.
 #SPECTRE_TTS_VOICE_REF=/root/boolian-voice.wav

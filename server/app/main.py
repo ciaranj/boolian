@@ -22,6 +22,7 @@ from .config import load_config
 from .llm import make_llm
 from .metrics import Metrics
 from .session import Conversation
+from .convolog import ConversationLog
 from .stt import make_stt
 from .tts import make_tts
 
@@ -33,11 +34,13 @@ stt = make_stt(cfg)
 llm = make_llm(cfg)
 tts = make_tts(cfg)
 metrics = Metrics()
+convo_log = ConversationLog(cfg.conversation_log)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     log.info("backends: stt=%s llm=%s tts=%s", cfg.stt_backend, cfg.llm_backend, cfg.tts_backend)
+    log.info("conversation log: %s", cfg.conversation_log or "off")
     # Model loading takes a while; /health/ready reports when everything is up.
     tasks = [asyncio.create_task(stt.load()), asyncio.create_task(llm.warmup())]
     if hasattr(tts, "load"):  # in-process TTS loads its model too
@@ -85,7 +88,7 @@ async def presenter(ws: WebSocket):
         async with lock:
             await ws.send_bytes(data)
 
-    convo = Conversation(cfg, stt, llm, tts, metrics, send_json, send_bytes)
+    convo = Conversation(cfg, stt, llm, tts, metrics, send_json, send_bytes, convo_log)
     watchdog = asyncio.create_task(convo.idle_watchdog())
     log.info("presenter connected from %s", ws.client)
     try:
