@@ -27,7 +27,8 @@ body.visitor {
   cursor: none;
 }
 
-#stage {
+#stage,
+.stage3d {
   position: fixed;
   inset: 0;
   width: 100vw;

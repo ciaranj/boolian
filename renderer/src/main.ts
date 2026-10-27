@@ -1,6 +1,7 @@
 import { EnergyVad, MicInput } from "./audio/mic";
 import { AudioOut } from "./audio/output";
 import { ACTIONS, EMOTIONS, Ghost, type Action, type ConvState, type Emotion } from "./ghost/ghost";
+import { Ghost3D } from "./ghost/ghost3d";
 import { paletteOf } from "./ghost/palettes";
 import { drawTestPattern } from "./ghost/testscene";
 import { Bus, type Cmd, type LogKind, type Status } from "./operator/bus";
@@ -448,6 +449,9 @@ function startStage() {
 
   const canvas = $<HTMLCanvasElement>("stage");
   const ctx = canvas.getContext("2d")!;
+  // ?renderer=3d draws him with three.js behind the 2D canvas, which then only shows the test pattern.
+  const ghost3d = q.get("renderer") === "3d" ? new Ghost3D(ghost, q.get("q3d") === "low" ? "low" : "high") : null;
+  if (ghost3d) canvas.before(ghost3d.canvas);
   let cw = 0;
   let ch = 0;
 
@@ -458,6 +462,7 @@ function startStage() {
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ghost3d?.resize(cw, ch);
   }
   window.addEventListener("resize", resize);
   resize();
@@ -496,10 +501,16 @@ function startStage() {
     out.reap();
 
     ghost.update(dt);
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, cw, ch);
-    if (testPattern) drawTestPattern(ctx, cw, ch, ghost);
-    else ghost.draw(ctx, cw, ch);
+    if (ghost3d && !testPattern) {
+      ctx.clearRect(0, 0, cw, ch);
+      ghost3d.render();
+    } else {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, cw, ch);
+      if (testPattern) drawTestPattern(ctx, cw, ch, ghost);
+      else ghost.draw(ctx, cw, ch);
+    }
+    ghost3d?.setVisible(!testPattern);
 
     frames++;
     if (now - meterT > 100) {

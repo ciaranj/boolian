@@ -27,6 +27,9 @@ cd renderer && npm install && npm run dev
 Open <http://localhost:5173/?operator>, click **wake**, then hold **Space** and talk, or type in "Visitor says".
 The mock ghost babbles in a warbly voice and cycles through canned replies.
 
+Add `&renderer=3d` for the three.js version: a lit 3D body with bloom, coloured mood lighting and real spins, using
+the same face and behaviour. `&q3d=low` drops the bloom for a weaker GPU. Without it you get the original 2D ghost.
+
 To use a real LLM on the Mac as well, any OpenAI-compatible server works. This was tested with Ollama's `llama3.2`:
 
 ```bash
@@ -130,7 +133,7 @@ Debug and art mode: `?state=speaking&emotion=mischievous&mouth=0.6` freezes a po
 
 ```
 server/      FastAPI + asyncio orchestration (session.py is the heart), pytest suite
-renderer/    Vite + TypeScript, Canvas 2D ghost (no runtime dependencies)
+renderer/    Vite + TypeScript, Canvas 2D ghost, or three.js with ?renderer=3d
 scripts/     smoke_test.py: end-to-end turns and latency against a running server
 infra/       docker compose for the VM
 docs/        protocol-v1.md

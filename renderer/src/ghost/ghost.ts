@@ -56,12 +56,27 @@ interface Pose {
   dx: number;
   dy: number;
   rot: number;
+  spin: number; // turn about the vertical axis (2D just adds it to rot)
   alpha: number;
   sx: number;
   sy: number;
 }
 
-interface Wisp {
+/** Where the body sits this frame, in ghost units around the screen centre (y down). */
+export interface Layout {
+  x: number;
+  y: number;
+  rot: number;
+  spin: number;
+  sx: number;
+  sy: number;
+  alpha: number; // includes the sleepy dimming
+  fade: number; // just the hide/peek fade
+  glow: number;
+  calm: number;
+}
+
+export interface Wisp {
   x: number;
   y: number;
   vy: number;
@@ -280,12 +295,12 @@ export class Ghost {
   }
 
   private pose(): Pose {
-    const pose: Pose = { dx: 0, dy: 0, rot: 0, alpha: 1, sx: 1, sy: 1 };
+    const pose: Pose = { dx: 0, dy: 0, rot: 0, spin: 0, alpha: 1, sx: 1, sy: 1 };
     const a = this.action;
     if (!a) return pose;
     const p = clamp((this.t - a.start) / a.dur, 0, 1);
     if (a.kind === "spin") {
-      pose.rot = easeInOut(p) * Math.PI * 2;
+      pose.spin = easeInOut(p) * Math.PI * 2;
       pose.sx = 1 - 0.18 * Math.sin(p * Math.PI);
       pose.dy = -35 * Math.sin(p * Math.PI);
     } else if (a.kind === "hide") {
@@ -323,10 +338,9 @@ export class Ghost {
     return pose;
   }
 
-  draw(ctx: CanvasRenderingContext2D, w: number, h: number, outline = false) {
+  /** Advances the sideways drag, so call it once per frame (draw() does). */
+  layout(): Layout {
     const t = this.t;
-    const s = this.settings;
-    const unit = (h / 700) * s.scale;
     const pose = this.pose();
     const calm = this.state === "listening" ? 0.4 : this.state === "sleeping" ? 0.6 : 1;
 
@@ -336,17 +350,52 @@ export class Ghost {
     this.drag = approach(this.drag, clamp((x - this.lastX) * 2.5, -25, 25), 4, 1 / 60);
     this.lastX = x;
 
-    const cx = w / 2 + s.offsetX * w + x * unit;
-    const cy = h / 2 + s.offsetY * h + (bob + this.bounce.x + pose.dy - 30) * unit;
     const rot = pose.rot + this.face.tilt + this.tilt.x * 0.05 + Math.sin(t * 0.5 + 1) * 0.03 * calm - this.drag * 0.002;
     const stretch = this.squash.x * 0.04 + this.lean * 0.04;
-    const sx = pose.sx * (1 - stretch * 0.5) * (1 + this.lean * 0.04);
-    const sy = pose.sy * (1 + stretch) * (1 + this.lean * 0.04);
-
     const sleepy = this.state === "sleeping" || this.state === "error";
-    const alpha = pose.alpha * (sleepy ? 0.78 : 1);
-    const glow =
-      s.glow * (0.75 + 0.25 * Math.sin(t * 1.4)) + this.speechLevel * 0.5 + this.glowBoost + (this.state === "thinking" ? 0.2 * Math.sin(t * 5) : 0);
+    return {
+      x,
+      y: bob + this.bounce.x + pose.dy - 30,
+      rot,
+      spin: pose.spin,
+      sx: pose.sx * (1 - stretch * 0.5) * (1 + this.lean * 0.04),
+      sy: pose.sy * (1 + stretch) * (1 + this.lean * 0.04),
+      alpha: pose.alpha * (sleepy ? 0.78 : 1),
+      fade: pose.alpha,
+      glow:
+        this.settings.glow * (0.75 + 0.25 * Math.sin(t * 1.4)) + this.speechLevel * 0.5 + this.glowBoost + (this.state === "thinking" ? 0.2 * Math.sin(t * 5) : 0),
+      calm,
+    };
+  }
+
+  get time() {
+    return this.t;
+  }
+  get currentEmotion() {
+    return this.emotion;
+  }
+  get currentIntensity() {
+    return this.emotion === "neutral" ? 0 : this.intensity;
+  }
+  get gazeX() {
+    return this.gaze.x;
+  }
+  get leanAmount() {
+    return this.lean;
+  }
+  get dragAmount() {
+    return this.drag;
+  }
+  get wispList(): readonly Wisp[] {
+    return this.wisps;
+  }
+
+  draw(ctx: CanvasRenderingContext2D, w: number, h: number, outline = false) {
+    const s = this.settings;
+    const unit = (h / 700) * s.scale;
+    const l = this.layout();
+    const cx = w / 2 + s.offsetX * w + l.x * unit;
+    const cy = h / 2 + s.offsetY * h + l.y * unit;
 
     ctx.save();
     ctx.translate(w / 2 + s.offsetX * w, h / 2 + s.offsetY * h);
@@ -356,9 +405,9 @@ export class Ghost {
 
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(rot);
-    ctx.scale(unit * sx, unit * sy);
-    ctx.globalAlpha = alpha;
+    ctx.rotate(l.rot + l.spin);
+    ctx.scale(unit * l.sx, unit * l.sy);
+    ctx.globalAlpha = l.alpha;
 
     if (outline) {
       this.bodyPath(ctx);
@@ -366,7 +415,7 @@ export class Ghost {
       ctx.lineWidth = 2 / unit;
       ctx.stroke();
     } else {
-      this.drawBody(ctx, glow, unit);
+      this.drawBody(ctx, l.glow, unit);
       this.drawFace(ctx);
       if (this.state === "thinking") this.drawThinkingDots(ctx);
       if (this.state === "sleeping") this.drawZzz(ctx);
@@ -408,11 +457,16 @@ export class Ghost {
     ctx.closePath();
   }
 
-  private drawArm(ctx: CanvasRenderingContext2D, side: -1 | 1, fill: CanvasGradient) {
+  /** Arm rotation in canvas radians (y down), about its shoulder at (side * 84, 40). */
+  armAngle(side: -1 | 1) {
     const t = this.t;
     const talk = this.state === "speaking" ? this.speechLevel * 0.35 * Math.sin(t * 9 + side) : 0;
     const cheer = this.emotion === "happy" || this.emotion === "surprised" ? 0.5 * this.intensity : 0;
-    const angle = side * (0.55 + cheer + Math.sin(t * 1.8 + side) * 0.12 + talk) - this.lean * side * 0.25;
+    return side * (0.55 + cheer + Math.sin(t * 1.8 + side) * 0.12 + talk) - this.lean * side * 0.25;
+  }
+
+  private drawArm(ctx: CanvasRenderingContext2D, side: -1 | 1, fill: CanvasGradient) {
+    const angle = this.armAngle(side);
     ctx.save();
     ctx.translate(side * 84, 40);
     ctx.rotate(angle);
@@ -477,7 +531,8 @@ export class Ghost {
     }
   }
 
-  private drawFace(ctx: CanvasRenderingContext2D) {
+  /** In ghost units around the body centre; the 3D renderer paints it onto a texture. */
+  drawFace(ctx: CanvasRenderingContext2D) {
     const f = this.face;
     const g = this.gaze;
 
@@ -582,7 +637,8 @@ export class Ghost {
     ctx.restore();
   }
 
-  private drawThinkingDots(ctx: CanvasRenderingContext2D) {
+  /** In ghost units around the body centre; the 3D renderer paints it onto a texture. */
+  drawThinkingDots(ctx: CanvasRenderingContext2D) {
     for (let i = 0; i < 3; i++) {
       const a = this.t * 2.2 + (i * Math.PI * 2) / 3;
       const x = 70 + Math.cos(a) * 30;
@@ -594,7 +650,8 @@ export class Ghost {
     }
   }
 
-  private drawZzz(ctx: CanvasRenderingContext2D) {
+  /** In ghost units around the body centre; the 3D renderer paints it onto a texture. */
+  drawZzz(ctx: CanvasRenderingContext2D) {
     ctx.font = "bold 22px ui-rounded, system-ui, sans-serif";
     for (let i = 0; i < 3; i++) {
       const p = (this.t * 0.35 + i / 3) % 1;
