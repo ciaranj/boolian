@@ -6,7 +6,12 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
+
+# Chatterbox draws a progress bar for every sentence, which would flood the server log. tqdm reads this
+# when it's first imported, so it has to be set before any model library loads.
+os.environ.setdefault("TQDM_DISABLE", "1")
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
