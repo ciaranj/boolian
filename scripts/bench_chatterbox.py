@@ -1,13 +1,16 @@
 """Chatterbox-Turbo speed check: Chatterbox's own token loop vs ours (app/chatterbox_fast.py),
 each on its own and while the LLM is busy generating (the two containers share the GPU).
 
-Run via `scripts/spectre-container.sh bench-chatterbox`.
+Run via `scripts/spectre-container.sh bench-chatterbox` (add --quick for just the correctness checks
+and the per-token cost breakdown).
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import subprocess
 import sys
 import time
 import wave
@@ -65,22 +68,86 @@ def save(path: str, samples, sr: int) -> None:
         w.writeframes((np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes())
 
 
-async def timed(label: str, fn, model, busy_llm: OpenAICompatLLM | None, tag: str) -> float:
-    """Synthesise every line; with busy_llm, keep the LLM generating the whole time."""
+def gpu_state() -> str:
+    """Performance state, clocks and power right now: a card idling in a low P-state is slow to ramp up."""
+    q = "pstate,clocks.sm,clocks.max.sm,clocks.mem,clocks.max.mem,utilization.gpu,power.draw,power.limit"
+    try:
+        out = subprocess.run(["nvidia-smi", f"--query-gpu={q}", "--format=csv,noheader"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        p, sm, sm_max, mem, mem_max, util, pw, pw_max = (x.strip() for x in out.split(","))
+        return f"{p}, SM {sm} of {sm_max}, memory {mem} of {mem_max}, util {util}, power {pw} of {pw_max}"
+    except Exception as e:
+        return f"nvidia-smi failed: {e!r}"
+
+
+@contextlib.asynccontextmanager
+async def llm_busy(llm: OpenAICompatLLM | None):
+    """Keep the LLM generating (sharing the GPU) for the duration; does nothing if llm is None."""
     stop = asyncio.Event()
 
-    async def keep_llm_busy():
+    async def keep_busy():
         prompt = [{"role": "user", "content": "Tell me a very long story about a lighthouse keeper."}]
         while not stop.is_set():
-            async for _ in busy_llm.stream(prompt, max_tokens=400):
+            async for _ in llm.stream(prompt, max_tokens=400):
                 if stop.is_set():
                     break
 
-    busy = asyncio.create_task(keep_llm_busy()) if busy_llm else None
-    if busy:
+    task = asyncio.create_task(keep_busy()) if llm else None
+    if task:
         await asyncio.sleep(0.5)  # let the LLM get going
-    total_audio = total_wall = 0.0
     try:
+        yield
+    finally:
+        stop.set()
+        if task:
+            task.cancel()
+
+
+@torch.inference_mode()
+def per_token_cost(model, label: str) -> None:
+    """Time each part of one decoding step in isolation, 100 times over, with the GPU synchronised.
+
+    Graph replay is pure GPU work for one token (no Python, no sampling); dividing the weights it
+    has to read by that time gives the memory bandwidth actually achieved, to compare with the card's."""
+    t3 = model.t3
+    from chatterbox.tts_turbo import punc_norm
+
+    text = model.tokenizer(punc_norm(LINES[1]), return_tensors="pt").input_ids.to(model.device)
+    start = torch.full_like(text[:, :1], t3.hp.start_speech_token)
+    embeds, _ = t3.prepare_input_embeds(t3_cond=model.conds.t3, text_tokens=text, speech_tokens=start, cfg_weight=0.0)
+    tok = torch.tensor(42, device=model.device)
+    dec = chatterbox_fast._decoder(t3)
+    dec.prefill(embeds)
+    dec.step(tok)  # captured by now
+
+    def ms_per_call(fn, n=100):
+        fn()
+        torch.cuda.synchronize()
+        t = time.perf_counter()
+        for _ in range(n):
+            fn()
+        torch.cuda.synchronize()
+        return (time.perf_counter() - t) / n * 1000
+
+    graph_ms = ms_per_call(dec.graph.replay)
+    state = gpu_state()  # sampled straight after sustained load
+    logits, seen = dec.logits[0], torch.zeros(dec.logits.shape[-1], dtype=torch.bool, device=model.device)
+    sample_ms = ms_per_call(lambda: chatterbox_fast._sample(logits, seen, 0.8, 1000, 0.95, 1.2))
+    out = t3.tfmr(inputs_embeds=embeds, use_cache=True)
+    past, emb = out.past_key_values, t3.speech_emb(tok.view(1, 1))
+    hf_ms = ms_per_call(lambda: t3.speech_head(t3.tfmr(inputs_embeds=emb, past_key_values=past, use_cache=True)[0][:, -1]), 50)
+
+    weights = [*t3.tfmr.h.parameters(), *t3.tfmr.ln_f.parameters(), *t3.speech_head.parameters()]
+    gb = sum(p.numel() * p.element_size() for p in weights) / 1e9
+    print(f"  {label}: GPU work per token (graph replay) {graph_ms:5.1f} ms, reading {gb:.2f} GB = "
+          f"{gb / graph_ms * 1000:4.0f} GB/s | sampling {sample_ms:4.1f} ms | Hugging Face step {hf_ms:5.1f} ms")
+    print(f"  {' ' * len(label)}  GPU during that: {state}")
+
+
+async def timed(label: str, fn, model, busy: OpenAICompatLLM | None, tag: str) -> float:
+    """Synthesise every line; with busy, keep the LLM generating the whole time."""
+    total_audio = total_wall = 0.0
+    async with llm_busy(busy):
         for i, line in enumerate(LINES, 1):
             t = time.monotonic()
             samples = await asyncio.to_thread(fn, model, line)
@@ -90,10 +157,6 @@ async def timed(label: str, fn, model, busy_llm: OpenAICompatLLM | None, tag: st
             total_wall += wall
             print(f"  {label}: {secs:4.1f}s of audio in {wall * 1000:5.0f} ms  ({line[:40]!r})")
             save(f"/tmp/boolian-bench-{tag}-{i}.wav", samples, model.sr)
-    finally:
-        stop.set()
-        if busy:
-            busy.cancel()
     rate = total_audio / total_wall
     print(f"  => {rate:.1f}x real time")
     return rate
@@ -172,6 +235,7 @@ async def main() -> int:
     cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
     print(f"[machine] {torch.cuda.get_device_name()}, {cores} CPU cores available, torch {torch.__version__}, "
           f"{torch.get_num_threads()} torch threads")
+    print(f"  GPU at rest: {gpu_state()}")
     print("\n[sampler] ours vs Hugging Face's logits processors")
     if not check_sampler():
         print("FAILED: the fast sampler doesn't match; not benchmarking it")
@@ -186,20 +250,30 @@ async def main() -> int:
     if not has_llm:
         print(f"  LLM not reachable at {cfg.llm_url}: skipping the busy-GPU runs")
 
+    quick = "--quick" in sys.argv[1:]
     results = {}
     for warm in LINES[:2]:
         original(model, warm)
-    print("\n[original loop]")
-    results["original"] = await timed("original", original, model, None, "original")
-    if has_llm:
-        print("\n[original loop, LLM busy]")
-        results["original+llm"] = await timed("original", original, model, llm, "original-busy")
+    if not quick:
+        print("\n[original loop]")
+        results["original"] = await timed("original", original, model, None, "original")
+        if has_llm:
+            print("\n[original loop, LLM busy]")
+            results["original+llm"] = await timed("original", original, model, llm, "original-busy")
 
     chatterbox_fast.prepare(model)
     print("\n[CUDA graph decoder vs Hugging Face, same inputs]")
     if not check_decoder(model):
         print("FAILED: the graph decoder doesn't match Hugging Face's GPT-2; not benchmarking it")
         return 1
+    print("\n[per-token cost, each part timed alone]")
+    await asyncio.to_thread(per_token_cost, model, "GPU otherwise idle")
+    if has_llm:
+        async with llm_busy(llm):
+            await asyncio.to_thread(per_token_cost, model, "LLM generating    ")
+    if quick:
+        await llm.aclose()
+        return 0
     for warm in LINES[:2]:
         chatterbox_fast.generate(model, warm)
         chatterbox_fast.generate(model, warm, graph=False)

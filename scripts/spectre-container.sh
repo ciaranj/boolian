@@ -154,7 +154,7 @@ cmd_bench_chatterbox() {
   load_env
   check_gpu
   cd "$SERVER"
-  exec "$PY" "$ROOT/scripts/bench_chatterbox.py"
+  exec "$PY" "$ROOT/scripts/bench_chatterbox.py" "$@"
 }
 
 cmd_undo_chatterbox() {
@@ -204,7 +204,7 @@ case "${1:-}" in
   selftest) shift; cmd_selftest "$@" ;;
   add-chatterbox) cmd_add_chatterbox ;;
   undo-chatterbox) cmd_undo_chatterbox ;;
-  bench-chatterbox) cmd_bench_chatterbox ;;
+  bench-chatterbox) shift; cmd_bench_chatterbox "$@" ;;
   run) cmd_run ;;
   service) cmd_service ;;
   *) sed -n '2,13p' "$0"; exit 1 ;;
