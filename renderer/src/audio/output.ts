@@ -177,6 +177,11 @@ export class AudioOut {
     return this.started;
   }
 
+  /** Call every frame: if speech_end got lost, end the reply once its audio has been silent for a few seconds. */
+  reap() {
+    if (this.started && this.ctx && this.sources.size === 0 && this.ctx.currentTime > this.nextTime + 3) this.finish("ended");
+  }
+
   private stopSources() {
     for (const s of this.sources) {
       s.onended = null;

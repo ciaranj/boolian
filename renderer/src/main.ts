@@ -56,6 +56,8 @@ function startStage() {
   let listenEndAt = 0;
   let speakingLocally = false;
   let localFlap = 0;
+  let localSilentFor = 0;
+  let autoBlockedSince = 0;
   let micInfo = "mic off";
   let backends = "";
   const latencies: number[] = [];
@@ -176,7 +178,16 @@ function startStage() {
   }
 
   function micAllowed() {
-    return conv !== "speaking" && conv !== "thinking" && !out.playing && !speakingLocally && performance.now() > tailUntil;
+    return autoBlocker() === null;
+  }
+
+  /** Why auto-listen is ignoring the mic right now, or null if it's listening for speech. */
+  function autoBlocker(): string | null {
+    if (conv === "speaking" || conv === "thinking") return `ghost is ${conv}`;
+    if (out.playing) return "reply audio still playing";
+    if (speakingLocally) return "browser voice still speaking";
+    if (performance.now() <= tailUntil) return "waiting for the echo to die away";
+    return null;
   }
 
   function startCapture(by: "ptt" | "vad") {
@@ -468,6 +479,13 @@ function startStage() {
     const dt = (now - last) / 1000;
     last = now;
 
+    // Chrome sometimes never fires onend for speechSynthesis; don't let that block the mic forever.
+    localSilentFor = speakingLocally && !speechSynthesis.speaking ? localSilentFor + dt : 0;
+    if (localSilentFor > 1) {
+      speakingLocally = false;
+      localSilentFor = 0;
+      setConv(link.connected ? "idle" : "sleeping");
+    }
     if (speakingLocally) {
       localFlap += dt * 11;
       ghost.speechLevel = 0.35 + 0.35 * Math.sin(localFlap) * Math.sin(localFlap * 0.37 + 1);
@@ -475,6 +493,7 @@ function startStage() {
       ghost.speechLevel = debugMouth ?? out.level();
     }
     if (conv === "thinking" && now - thinkingSince > 25000) setConv("idle"); // never get stuck pondering
+    out.reap();
 
     ghost.update(dt);
     ctx.fillStyle = "#000";
@@ -486,6 +505,13 @@ function startStage() {
     if (now - meterT > 100) {
       report({ s: "meter", db: mic.db, thresh: vad.threshold });
       meterT = now;
+      const blocker = settings.autoListen && awake && mic.running && !capturing ? autoBlocker() : null;
+      if (!blocker || conv === "speaking" || conv === "thinking") autoBlockedSince = 0;
+      else if (!autoBlockedSince) autoBlockedSince = now;
+      else if (autoBlockedSince > 0 && now - autoBlockedSince > 8000) {
+        log("err", `auto-listen paused: ${blocker}`);
+        autoBlockedSince = -1; // once per stuck spell
+      }
     }
     if (now - fpsT > 1000) {
       report({ s: "info", out: `${frames} fps · output latency ${(out.latencyS * 1000).toFixed(0)} ms` });
