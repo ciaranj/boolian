@@ -46,6 +46,7 @@ export class MicInput {
   db = -100;
   onFrame: (pcm: Int16Array, db: number) => void = () => {};
   private stream: MediaStream | null = null;
+  private registered = new WeakSet<AudioContext>();
   private node: AudioWorkletNode | null = null;
 
   get running() {
@@ -68,9 +69,12 @@ export class MicInput {
         autoGainControl: true,
       },
     });
-    const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
-    await ctx.audioWorklet.addModule(url);
-    URL.revokeObjectURL(url);
+    if (!this.registered.has(ctx)) {
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      this.registered.add(ctx);
+    }
     const src = ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(ctx, "ghost-mic");
     this.node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {

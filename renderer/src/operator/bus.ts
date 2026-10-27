@@ -33,6 +33,7 @@ export type Status =
   | { s: "meter"; db: number; thresh: number }
   | { s: "info"; mic?: string; out?: string; backends?: string }
   | { s: "settings"; settings: Settings }
+  | { s: "mics"; mics: { id: string; label: string }[] }
   | { s: "mute"; on: boolean }
   | { s: "talk"; on: boolean }
   | { s: "awake"; on: boolean };

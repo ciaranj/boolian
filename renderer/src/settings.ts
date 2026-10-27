@@ -9,6 +9,7 @@ export interface Settings {
   serverUrl: string;
   autoListen: boolean;
   palette: string;
+  micDevice: string; // "" = the system default input
 }
 
 const KEY = "spectre.settings.v1";
@@ -30,6 +31,7 @@ export function loadSettings(): Settings {
     serverUrl: defaultServer(),
     autoListen: false,
     palette: "spectral",
+    micDevice: "",
   };
   try {
     Object.assign(s, JSON.parse(localStorage.getItem(KEY) ?? "{}"));

@@ -324,10 +324,13 @@ function startStage() {
       case "action":
         ghost.doAction(cmd.action, 0.9, true);
         break;
-      case "settings":
+      case "settings": {
+        const micChanged = cmd.patch.micDevice !== undefined && cmd.patch.micDevice !== settings.micDevice;
         Object.assign(settings, cmd.patch);
         saveAndApply();
+        if (micChanged) startMic();
         break;
+      }
       case "nudge":
         settings[cmd.key] = Math.round((settings[cmd.key] + cmd.delta) * 1000) / 1000;
         saveAndApply();
@@ -347,6 +350,7 @@ function startStage() {
         bus.status({ s: "mute", on: out.isMuted });
         bus.status({ s: "awake", on: awake });
         bus.status({ s: "info", mic: micInfo, backends });
+        bus.status({ s: "mics", mics });
         break;
     }
   }
@@ -368,16 +372,20 @@ function startStage() {
 
   // ---------------------------------------------------------------- waking up (audio unlock)
 
-  async function wake() {
-    if (awake) return;
-    awake = true;
-    $("wake").hidden = true;
-    report({ s: "awake", on: true });
-    const ctx = await out.unlock();
-    applySettings();
-    out.chime();
+  let mics: { id: string; label: string }[] = [];
+
+  async function startMic() {
+    const ctx = out.ctx;
+    if (!ctx) return; // not awake yet: wake() starts it with the saved choice
+    if (capturing) stopCapture(false);
     try {
-      await mic.start(ctx);
+      try {
+        await mic.start(ctx, settings.micDevice || undefined);
+      } catch (err) {
+        if (!settings.micDevice) throw err;
+        log("err", "the chosen microphone isn't available: using the system default");
+        await mic.start(ctx);
+      }
       micInfo = `mic: ${mic.deviceLabel} (${ctx.sampleRate} Hz → 16 kHz)`;
       log("dim", micInfo);
     } catch (err) {
@@ -385,6 +393,32 @@ function startStage() {
       log("err", "microphone unavailable: use typed input or puppet lines");
     }
     report({ s: "info", mic: micInfo });
+    await listMics();
+  }
+
+  // Device names are only visible once the page has mic permission, so list them after starting.
+  async function listMics() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      mics = devices
+        .filter((d) => d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications")
+        .map((d) => ({ id: d.deviceId, label: d.label || "unnamed microphone" }));
+    } catch {
+      mics = [];
+    }
+    report({ s: "mics", mics });
+  }
+  navigator.mediaDevices?.addEventListener("devicechange", () => awake && listMics());
+
+  async function wake() {
+    if (awake) return;
+    awake = true;
+    $("wake").hidden = true;
+    report({ s: "awake", on: true });
+    await out.unlock();
+    applySettings();
+    out.chime();
+    await startMic();
     setConv(link.connected ? "idle" : "sleeping");
   }
 

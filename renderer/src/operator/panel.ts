@@ -15,6 +15,7 @@ export class Panel {
   private el = $("panel");
   private autoListen = false;
   private talking = false;
+  private micDevice = "";
 
   constructor(private run: (c: Cmd) => void) {
     for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-cmd]")) {
@@ -79,6 +80,9 @@ export class Panel {
     for (const [name, p] of Object.entries(PALETTES)) palette.add(new Option(p.label, name));
     palette.addEventListener("change", () => run({ c: "settings", patch: { palette: palette.value } }));
 
+    const micSel = $<HTMLSelectElement>("s-mic");
+    micSel.addEventListener("change", () => run({ c: "settings", patch: { micDevice: micSel.value } }));
+
     $("server-form").addEventListener("submit", (e) => {
       e.preventDefault();
       run({ c: "server", url: $<HTMLInputElement>("server").value.trim() });
@@ -139,6 +143,12 @@ export class Panel {
       case "settings":
         this.applySettings(st.settings);
         break;
+      case "mics": {
+        const sel = $<HTMLSelectElement>("s-mic");
+        sel.replaceChildren(new Option("System default", ""), ...st.mics.map((m) => new Option(m.label, m.id)));
+        sel.value = this.micDevice;
+        break;
+      }
       case "mute":
         $("mute-btn").classList.toggle("on", st.on);
         break;
@@ -158,6 +168,8 @@ export class Panel {
       if (document.activeElement !== el) el.value = String(s[key]);
     }
     $<HTMLSelectElement>("s-palette").value = s.palette;
+    this.micDevice = s.micDevice;
+    $<HTMLSelectElement>("s-mic").value = s.micDevice;
     this.autoListen = s.autoListen;
     $<HTMLInputElement>("auto-listen").checked = s.autoListen;
     const server = $<HTMLInputElement>("server");
