@@ -144,11 +144,10 @@ async def test_fast_voice_has_no_filler():
     assert rec.types().index("expression") < rec.types().index("speech_start")
 
 
-async def test_quiet_visitor_is_nudged_then_forgotten():
+async def test_quiet_visitor_is_nudged_twice_then_forgotten():
     convo, rec = make()
     object.__setattr__(convo.cfg, "nudge_s", 10)
     object.__setattr__(convo.cfg, "max_nudges", 2)
-    object.__setattr__(convo.cfg, "idle_reset_s", 30)
     await convo.handle_json({"type": "text", "text": "hello"})
     await finish(convo)
     history = list(convo.history)
@@ -164,9 +163,19 @@ async def test_quiet_visitor_is_nudged_then_forgotten():
     assert rec.types().count("speech_start") == 3
 
     convo.last_activity -= 11
-    await convo.idle_tick()  # nudged out; not yet time to forget them
-    assert not convo.busy and convo.history
-    convo.last_activity -= 20
+    await convo.idle_tick()  # still nobody: he gives up, says so, and forgets them
+    await finish(convo)
+    assert rec.types().count("speech_start") == 4
+    assert not convo.history and convo.nudges == 0 and rec.json[-1]["reason"] == "nobody there"
+
+
+async def test_idle_reset_without_nudges():
+    convo, rec = make()
+    object.__setattr__(convo.cfg, "nudge_s", 0)
+    object.__setattr__(convo.cfg, "idle_reset_s", 30)
+    await convo.handle_json({"type": "text", "text": "hello"})
+    await finish(convo)
+    convo.last_activity -= 31
     await convo.idle_tick()
     assert not convo.history and rec.json[-1]["reason"] == "idle"
 

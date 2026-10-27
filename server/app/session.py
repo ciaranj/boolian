@@ -158,20 +158,29 @@ class Conversation:
             await self.idle_tick()
 
     async def idle_tick(self) -> None:
-        """If he spoke and nobody answered, prompt them (a couple of times); after a longer quiet spell,
-        forget the visitor so the next group gets a fresh ghost."""
+        """If he spoke and nobody answered, ask if they're still there (max_nudges times); if that gets no
+        answer either, say goodbye and forget them, so the next group gets a fresh ghost."""
         if not self.history or self.busy or self.listening:
             return
         quiet = time.monotonic() - self.last_activity
-        if self.cfg.nudge_s and self.nudges < self.cfg.max_nudges and quiet > self.cfg.nudge_s:
-            self.nudges += 1
-            lines = persona.LONELY_LINES if self.nudges == self.cfg.max_nudges else persona.NUDGE_LINES
-            emotion, action, text = persona.pick(lines)
-            log.info("nobody answered; nudge %d", self.nudges)
-            # Not remembered: the LLM should carry on from the conversation, not from the prompting.
-            self._start("nudge", lambda gen, t: self._say_turn(gen, t, emotion, action, text, remember=False))
-        elif quiet > self.cfg.idle_reset_s:
+        if self.cfg.nudge_s and quiet > self.cfg.nudge_s:
+            if self.nudges < self.cfg.max_nudges:
+                self.nudges += 1
+                emotion, action, text = persona.pick(persona.NUDGE_LINES)
+                log.info("nobody answered; nudge %d", self.nudges)
+                # Not remembered: the LLM should carry on from the conversation, not from the prompting.
+                self._start("nudge", lambda gen, t: self._say_turn(gen, t, emotion, action, text, remember=False))
+            else:
+                emotion, action, text = persona.pick(persona.LONELY_LINES)
+                log.info("nobody answered %d nudges; giving up", self.nudges)
+                self._start("nudge", lambda gen, t: self._give_up(gen, t, emotion, action, text))
+        elif quiet > self.cfg.idle_reset_s:  # only reached with nudging off
             await self.reset("idle")
+
+    async def _give_up(self, gen: int, timing: TurnTiming, emotion: str, action: str, text: str) -> None:
+        await self._say_turn(gen, timing, emotion, action, text, remember=False)
+        if gen == self.generation:  # nobody spoke up while he was saying it
+            await self._forget("nobody there")
 
     async def close(self) -> None:
         if self.task and not self.task.done():

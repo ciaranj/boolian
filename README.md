@@ -108,8 +108,8 @@ All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
   off, but a group of chattering trick-or-treaters still counts as talking. In the operator panel, *Voice
   threshold* sets how sure it must be that it's hearing speech (lower is more sensitive), and *Pause before reply*
   sets how long it waits after they stop. *Detect speech by* switches back to the old loudness-only detector.
-- **G** greets the group, which helps because kids don't know they can talk to him. **R** forgets the visitor;
-  this also happens automatically after 40 s of quiet.
+- **G** greets the group, which helps because kids don't know they can talk to him. **R** forgets the visitor.
+  If nobody answers him, he asks if they're still there twice (12 s apart), then says goodbye and forgets them.
 - **1–9** play puppet lines, and the "Boolian says" box speaks any typed text in his voice. Both still work if the
   server is down, using the browser's own voice.
 - **X** / **Esc** stops him talking. **M** mutes.
