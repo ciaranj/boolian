@@ -57,11 +57,9 @@ def prepare(model) -> None:
         except Exception:
             log.exception("couldn't capture CUDA graphs; using the plain loop")
             _graph_broken = True
-        try:
-            with torch.inference_mode():
-                FlowGraphs.install(model)
-        except Exception:
-            log.exception("couldn't capture the audio decoder's CUDA graphs; it runs as before")
+        # FlowGraphs (the audio decoder as CUDA graphs) isn't installed here yet: in bench-chatterbox
+        # --decoder it changed one short sentence's audio (largest sample difference 0.02 against a 0.31
+        # peak) while matching longer ones exactly. Until that's understood, the decoder runs as before.
 
 
 def watermarker_to(model, device) -> None:

@@ -255,17 +255,46 @@ def decoder_profile(model) -> None:
         return s3.inference(speech_tokens=toks, ref_dict=ref, n_cfm_timesteps=2)[0]
 
     # 1. Same tokens and random seed, with and without the graphs: the audio must match.
-    print("  same tokens and seed, with vs without flow graphs:")
+    print("  whole decoder, same tokens and seed: as before twice (is it even deterministic?), then with graphs")
     ok = True
     for toks in tokens:
         flow.enabled = False
         a = decode(toks, seed=7)
+        a2 = decode(toks, seed=7)
         flow.enabled = True
         b = decode(toks, seed=7)
-        diff = float((a - b).abs().max())
+        base = float((a - a2).abs().max())
+        d = (a - b).abs().flatten()
+        diff, where = float(d.max()), int(d.argmax())
+        differ = float((d > 1e-4).float().mean())
         peak = float(a.abs().max())
         ok &= a.shape == b.shape and diff < 1e-3 * max(peak, 1e-3)
-        print(f"    {a.shape[-1] / model.sr:4.1f}s: largest sample difference {diff:.2e} (peak {peak:.2f})")
+        print(f"    {a.shape[-1] / model.sr:4.1f}s ({len(toks)} tokens): as before vs as before {base:.2e} | with graphs "
+              f"{diff:.2e} (peak {peak:.2f}), largest at {where / d.numel():.0%} of the way through, "
+              f"{differ:.1%} of samples differ by >1e-4")
+
+    print("  flow network alone, identical random inputs: as before twice, then the graph")
+    prompt = ref["prompt_feat"].shape[1]
+    for toks in tokens:
+        n = prompt + 2 * len(toks)  # mel frames: reference clip + 2 per speech token
+        g = torch.Generator(model.device).manual_seed(0)
+        dev, dt = model.device, s3.flow.decoder.estimator.dtype
+
+        def rnd(*shape):
+            return torch.randn(*shape, device=dev, dtype=dt, generator=g)
+
+        inp = dict(x=rnd(1, 80, n), mask=torch.ones(1, 1, n, device=dev, dtype=dt), mu=rnd(1, 80, n),
+                   t=torch.tensor([0.3], device=dev, dtype=dt), spks=rnd(1, 80), cond=rnd(1, 80, n),
+                   r=torch.tensor([0.8], device=dev, dtype=dt))
+        e1, e2 = flow.eager(**inp), flow.eager(**inp)
+        flow.enabled = True
+        gr = flow.forward(**inp)
+        dd = (e1 - gr).abs().amax(dim=1).flatten()  # per frame
+        length = -(-n // chatterbox_fast.FLOW_STEP) * chatterbox_fast.FLOW_STEP
+        bad = (dd > 1e-4).nonzero().flatten()
+        first_bad = f"first differing frame {int(bad[0])} of {n}" if len(bad) else "no frame differs by >1e-4"
+        print(f"    {n} frames (graph for {length}{'' if length in flow.graphs else ', not recorded: ran as before'}): "
+              f"as before vs as before {float((e1 - e2).abs().max()):.2e} | graph {float(dd.max()):.2e}, {first_bad}")
     if not ok:
         print("  FAILED: the flow graphs change the audio; not timing them")
         return
