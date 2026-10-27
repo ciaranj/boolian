@@ -6,6 +6,7 @@
 #   scripts/spectre-container.sh add-chatterbox    # optional: install the Chatterbox-Turbo voice too
 #   scripts/spectre-container.sh selftest --compare  # time Kokoro vs Chatterbox, save WAVs to listen to
 #   scripts/spectre-container.sh undo-chatterbox   # put the environment back as it was before add-chatterbox
+#   scripts/spectre-container.sh bench-chatterbox  # Chatterbox speed: original vs fast loop, with/without LLM load
 #   scripts/spectre-container.sh run        # start the server (port 8765)
 #   scripts/spectre-container.sh service    # install + start a systemd unit so it survives reboots
 #
@@ -149,6 +150,13 @@ EOF
   log "Done. Next: $0 selftest --compare   (then set SPECTRE_TTS_BACKEND=chatterbox in spectre.env to use it)"
 }
 
+cmd_bench_chatterbox() {
+  load_env
+  check_gpu
+  cd "$SERVER"
+  exec "$PY" "$ROOT/scripts/bench_chatterbox.py"
+}
+
 cmd_undo_chatterbox() {
   [ -d "$BACKUP" ] || die "no backup at $BACKUP: add-chatterbox was never run"
   log "Restoring the environment from before add-chatterbox"
@@ -196,7 +204,8 @@ case "${1:-}" in
   selftest) shift; cmd_selftest "$@" ;;
   add-chatterbox) cmd_add_chatterbox ;;
   undo-chatterbox) cmd_undo_chatterbox ;;
+  bench-chatterbox) cmd_bench_chatterbox ;;
   run) cmd_run ;;
   service) cmd_service ;;
-  *) sed -n '2,12p' "$0"; exit 1 ;;
+  *) sed -n '2,13p' "$0"; exit 1 ;;
 esac

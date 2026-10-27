@@ -69,7 +69,7 @@ def test_factory_selects_chatterbox():
 
 
 async def test_chatterbox_chunks_whole_clip_and_skips_empty_text():
-    tts = ChatterboxTTS(replace(load_config(), tts_backend="chatterbox"))
+    tts = ChatterboxTTS(replace(load_config(), tts_backend="chatterbox", tts_fast=False))
     tts.model = FakeChatterbox(n=24_000 // 4 * 2 + 10)  # two full chunks and a bit
     chunks = [c async for c in tts.synth("Boo! [chuckle] Got you.")]
     assert [len(c) // 2 for c in chunks] == [6000, 6000, 10]

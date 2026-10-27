@@ -133,6 +133,10 @@ class ChatterboxTTS(TTSBase):
         self.model = await asyncio.to_thread(ChatterboxTurboTTS.from_pretrained, device)
         if self.cfg.tts_voice_ref:
             await asyncio.to_thread(self.model.prepare_conditionals, self.cfg.tts_voice_ref)
+        if self.cfg.tts_fast:
+            from . import chatterbox_fast
+
+            chatterbox_fast.prepare(self.model)
         self.sample_rate = self.model.sr
         await asyncio.to_thread(self._run, "Hello there.")  # warm-up
         self.fillers = await asyncio.to_thread(self._make_fillers)
@@ -154,8 +158,12 @@ class ChatterboxTTS(TTSBase):
         return self.model is not None
 
     def _run(self, text: str) -> bytes:
-        wav = self.model.generate(text)
-        samples = wav.squeeze(0).detach().cpu().numpy()
+        if self.cfg.tts_fast:
+            from . import chatterbox_fast
+
+            samples = chatterbox_fast.generate(self.model, text)
+        else:
+            samples = self.model.generate(text).squeeze(0).detach().cpu().numpy()
         return (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
 
     async def synth(self, text: str) -> AsyncIterator[bytes]:
