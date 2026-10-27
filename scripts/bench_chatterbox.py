@@ -2,7 +2,7 @@
 each on its own and while the LLM is busy generating (the two containers share the GPU).
 
 Run via `scripts/spectre-container.sh bench-chatterbox` (add --quick for just the correctness checks
-and the per-token cost breakdown).
+and the per-token cost breakdown, or --decoder for where the audio decoder's time goes).
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import wave
+from collections import defaultdict
 
 import numpy as np
 
@@ -233,6 +234,94 @@ def profile(model, label: str, graph: bool) -> None:
               f"decoder {(t3 - t2) * 1000:4.0f} ms | watermark {(t4 - t3) * 1000:4.0f} ms")
 
 
+@torch.inference_mode()
+def decoder_profile(model) -> None:
+    """Where S3Gen (speech tokens -> waveform) spends its ~230 ms per sentence."""
+    from chatterbox.models.s3gen.const import S3GEN_SIL
+    from chatterbox.tts_turbo import punc_norm
+
+    s3, ref = model.s3gen, model.conds.gen
+    sil = torch.full((3,), S3GEN_SIL, device=model.device)
+    tokens = []
+    for line in LINES:
+        text = model.tokenizer(punc_norm(line), return_tensors="pt").input_ids.to(model.device)
+        t = chatterbox_fast.speech_tokens(model.t3, model.conds.t3, text)
+        tokens.append(torch.cat([t[t < chatterbox_fast.OOV_FROM], sil]))
+
+    def decode(toks, ref_dict=ref):
+        return s3.inference(speech_tokens=toks, ref_dict=ref_dict, n_cfm_timesteps=2)
+
+    # 1. Each stage, timed with the GPU synchronised either side.
+    times: dict[str, float] = defaultdict(float)
+    patched = []
+
+    def time_method(obj, name, key):
+        orig = getattr(obj, name)
+
+        def wrapper(*a, **k):
+            torch.cuda.synchronize()
+            t = time.perf_counter()
+            r = orig(*a, **k)
+            torch.cuda.synchronize()
+            times[key] += time.perf_counter() - t
+            return r
+
+        setattr(obj, name, wrapper)
+        patched.append((obj, name))
+
+    time_method(s3.flow.encoder, "forward", "encoder")
+    time_method(s3.flow.decoder.estimator, "forward", "flow steps")
+    time_method(s3.mel2wav, "inference", "vocoder")
+    prompt_s = ref["prompt_token"].shape[1] / 25
+    print(f"  reference clip: {prompt_s:.1f}s ({ref['prompt_token'].shape[1]} tokens) is re-processed every sentence")
+    for toks in tokens:
+        decode(toks)  # warm-up for this length
+        times.clear()
+        torch.cuda.synchronize()
+        t = time.perf_counter()
+        decode(toks)
+        torch.cuda.synchronize()
+        total = time.perf_counter() - t
+        other = total - sum(times.values())
+        print(f"  {len(toks) / 25:4.1f}s of speech: total {total * 1000:4.0f} ms = encoder {times['encoder'] * 1000:4.0f}"
+              f" + flow steps (2) {times['flow steps'] * 1000:4.0f} + vocoder {times['vocoder'] * 1000:4.0f}"
+              f" + other {other * 1000:4.0f}")
+    for obj, name in patched:
+        delattr(obj, name)
+
+    # 2. How much of that the GPU is actually busy, for the shortest sentence.
+    from torch.profiler import ProfilerActivity, profile
+
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        torch.cuda.synchronize()
+        t = time.perf_counter()
+        decode(tokens[0])
+        torch.cuda.synchronize()
+        wall = time.perf_counter() - t
+    kernels = [e for e in prof.events() if e.device_type.name == "CUDA"]
+    busy_us = sum(e.time_range.elapsed_us() for e in kernels)  # one stream, so kernels don't overlap
+    print(f"  shortest sentence under the profiler: {wall * 1000:.0f} ms wall, GPU kernels busy {busy_us / 1000:.0f} ms "
+          f"across {len(kernels)} launches")
+
+    # 3. Cost against reference length (timing only: a shorter reference changes the voice conditioning).
+    n = ref["prompt_token"].shape[1]
+    for frac in (1.0, 0.5, 0.25):
+        k = int(n * frac)
+        d = dict(ref)
+        d["prompt_token"] = ref["prompt_token"][:, :k]
+        d["prompt_token_len"] = torch.tensor([k], device=model.device)
+        d["prompt_feat"] = ref["prompt_feat"][:, : 2 * k]
+        if ref.get("prompt_feat_len") is not None:
+            d["prompt_feat_len"] = torch.tensor([2 * k], device=model.device)
+        decode(tokens[0], d)
+        torch.cuda.synchronize()
+        t = time.perf_counter()
+        for _ in range(3):
+            decode(tokens[0], d)
+        torch.cuda.synchronize()
+        print(f"  reference trimmed to {k / 25:4.1f}s: {(time.perf_counter() - t) / 3 * 1000:4.0f} ms for the shortest sentence")
+
+
 def original(model, text):
     return model.generate(text).squeeze(0).numpy()
 
@@ -260,6 +349,14 @@ async def main() -> int:
         print(f"  LLM not reachable at {cfg.llm_url}: skipping the busy-GPU runs")
 
     quick = "--quick" in sys.argv[1:]
+    if "--decoder" in sys.argv[1:]:
+        chatterbox_fast.prepare(model)
+        for warm in LINES[:2]:
+            chatterbox_fast.generate(model, warm)
+        print(f"\n[audio decoder] GPU at rest: {gpu_state()}")
+        decoder_profile(model)
+        await llm.aclose()
+        return 0
     results = {}
     for warm in LINES[:2]:
         original(model, warm)

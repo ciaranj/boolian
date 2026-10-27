@@ -6,7 +6,7 @@
 #   scripts/spectre-container.sh add-chatterbox    # optional: install the Chatterbox-Turbo voice too
 #   scripts/spectre-container.sh selftest --compare  # time Kokoro vs Chatterbox, save WAVs to listen to
 #   scripts/spectre-container.sh undo-chatterbox   # put the environment back as it was before add-chatterbox
-#   scripts/spectre-container.sh bench-chatterbox  # Chatterbox speed: original vs fast loop, with/without LLM load
+#   scripts/spectre-container.sh bench-chatterbox  # Chatterbox speed (--quick: per-token; --decoder: audio decoder)
 #   scripts/spectre-container.sh run        # start the server (port 8765)
 #   scripts/spectre-container.sh service    # install + start a systemd unit so it survives reboots
 #
