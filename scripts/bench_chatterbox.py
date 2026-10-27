@@ -99,8 +99,41 @@ async def timed(label: str, fn, model, busy_llm: OpenAICompatLLM | None, tag: st
     return rate
 
 
-def profile(model, label: str) -> None:
-    """Where one sentence's time goes, stage by stage (fast token loop)."""
+@torch.inference_mode()
+def check_decoder(model) -> bool:
+    """The CUDA-graph GPT-2 must predict what Hugging Face's does, for the same prompt and tokens."""
+    from chatterbox.tts_turbo import punc_norm
+
+    t3 = model.t3
+    text = model.tokenizer(punc_norm(LINES[1]), return_tensors="pt").input_ids.to(model.device)
+    start = torch.full_like(text[:, :1], t3.hp.start_speech_token)
+    embeds, _ = t3.prepare_input_embeds(t3_cond=model.conds.t3, text_tokens=text, speech_tokens=start, cfg_weight=0.0)
+    forced = torch.randint(0, chatterbox_fast.OOV_FROM, (40,), device=model.device,
+                           generator=torch.Generator(model.device).manual_seed(1))
+
+    out = t3.tfmr(inputs_embeds=embeds, use_cache=True)
+    past, ref = out.past_key_values, [t3.speech_head(out[0][:, -1])]
+    for tok in forced:
+        out = t3.tfmr(inputs_embeds=t3.speech_emb(tok.view(1, 1)), past_key_values=past, use_cache=True)
+        past = out.past_key_values
+        ref.append(t3.speech_head(out[0][:, -1]))
+
+    dec = chatterbox_fast._decoder(t3)
+    got = [dec.prefill(embeds).clone()]
+    for tok in forced:
+        got.append(dec.step(tok).clone())
+
+    ref_t, got_t = torch.cat(ref), torch.cat(got)
+    diff = float((ref_t - got_t).abs().max())
+    scale = float(ref_t.abs().max())
+    same_top = int((ref_t.argmax(-1) == got_t.argmax(-1)).sum())
+    print(f"  {len(ref)} steps: largest logit difference {diff:.2e} (logits up to {scale:.1f}), "
+          f"same top token {same_top}/{len(ref)}")
+    return diff < 1e-2 * max(scale, 1.0) and same_top == len(ref)
+
+
+def profile(model, label: str, graph: bool) -> None:
+    """Where one sentence's time goes, stage by stage."""
     from chatterbox.models.s3gen.const import S3GEN_SIL
     from chatterbox.tts_turbo import punc_norm
 
@@ -113,7 +146,7 @@ def profile(model, label: str) -> None:
         text_tokens = model.tokenizer(punc_norm(line), return_tensors="pt", padding=True, truncation=True).input_ids
         text_tokens = text_tokens.to(model.device)
         t1 = now()
-        toks = chatterbox_fast.speech_tokens(model.t3, model.conds.t3, text_tokens)
+        toks = chatterbox_fast.speech_tokens(model.t3, model.conds.t3, text_tokens, graph=graph)
         t2 = now()
         toks = torch.cat([toks[toks < chatterbox_fast.OOV_FROM], torch.full((3,), S3GEN_SIL, device=toks.device)])
         with torch.inference_mode():
@@ -163,15 +196,17 @@ async def main() -> int:
         results["original+llm"] = await timed("original", original, model, llm, "original-busy")
 
     chatterbox_fast.prepare(model)
+    print("\n[CUDA graph decoder vs Hugging Face, same inputs]")
+    if not check_decoder(model):
+        print("FAILED: the graph decoder doesn't match Hugging Face's GPT-2; not benchmarking it")
+        return 1
     for warm in LINES[:2]:
         chatterbox_fast.generate(model, warm)
-    print("\n[where the time goes, fast loop]")
-    chatterbox_fast.watermarker_to(model, "cpu")
-    profile(model, "watermark on CPU")
-    chatterbox_fast.watermarker_to(model, model.device)
-    model.watermarker.apply_watermark(np.zeros(24_000, dtype=np.float32), sample_rate=model.sr)  # warm-up
-    profile(model, "watermark on GPU")
-    print("\n[fast loop]")
+        chatterbox_fast.generate(model, warm, graph=False)
+    print("\n[where the time goes]")
+    profile(model, "plain loop ", graph=False)
+    profile(model, "CUDA graph ", graph=True)
+    print("\n[fast loop, CUDA graph]")
     results["fast"] = await timed("fast", chatterbox_fast.generate, model, None, "fast")
     if has_llm:
         print("\n[fast loop, LLM busy]")
