@@ -192,7 +192,7 @@ class FlowGraphs:
 
     def __init__(self, estimator, lengths):
         self.est = estimator
-        self.eager = estimator.forward  # the original bound method
+        self.eager = type(estimator).forward.__get__(estimator)  # the original, even if forward is already hooked
         self.enabled = True
         self.pool = torch.cuda.graph_pool_handle()  # shared: graphs never run at once, outputs are copied out
         self.graphs: dict[int, tuple] = {}

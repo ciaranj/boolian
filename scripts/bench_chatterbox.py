@@ -295,6 +295,47 @@ def decoder_profile(model) -> None:
         first_bad = f"first differing frame {int(bad[0])} of {n}" if len(bad) else "no frame differs by >1e-4"
         print(f"    {n} frames (graph for {length}{'' if length in flow.graphs else ', not recorded: ran as before'}): "
               f"as before vs as before {float((e1 - e2).abs().max()):.2e} | graph {float(dd.max()):.2e}, {first_bad}")
+
+    # TF32: cuDNN may use it for convolutions by default, depending on the algorithm it picks for a
+    # given length, so the eager (unpadded) and graph (padded) runs can round differently.
+    print(f"  TF32 allowed: matmul {torch.backends.cuda.matmul.allow_tf32}, cuDNN {torch.backends.cudnn.allow_tf32}"
+          f" | cuDNN benchmark mode {torch.backends.cudnn.benchmark}")
+    est = s3.flow.decoder.estimator
+    eager = type(est).forward.__get__(est)
+    for toks in tokens:
+        n = prompt + 2 * len(toks)
+        length = -(-n // chatterbox_fast.FLOW_STEP) * chatterbox_fast.FLOW_STEP
+        g = torch.Generator(model.device).manual_seed(0)
+        dev, dt = model.device, est.dtype
+
+        def rnd(*shape):
+            return torch.randn(*shape, device=dev, dtype=dt, generator=g)
+
+        inp = dict(x=rnd(1, 80, n), mask=torch.ones(1, 1, n, device=dev, dtype=dt), mu=rnd(1, 80, n),
+                   t=torch.tensor([0.3], device=dev, dtype=dt), spks=rnd(1, 80), cond=rnd(1, 80, n),
+                   r=torch.tensor([0.8], device=dev, dtype=dt))
+        with_tf32 = eager(**inp)
+        prev = torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32
+        torch.backends.cuda.matmul.allow_tf32 = torch.backends.cudnn.allow_tf32 = False
+        try:
+            exact = eager(**inp)
+            strict = chatterbox_fast.FlowGraphs(est, [length])  # recorded with TF32 off
+            graph_exact = strict.forward(**inp)
+            del strict
+        finally:
+            torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32 = prev
+        print(f"    {n} frames, TF32 off: as before vs graph {float((exact - graph_exact).abs().max()):.2e} | "
+              f"for scale, as before with vs without TF32 {float((with_tf32 - exact).abs().max()):.2e}")
+
+    # Listen for yourself: the short sentence, as before and with the graph (TF32 as normal).
+    flow.enabled = False
+    a = decode(tokens[0], seed=7)
+    flow.enabled = True
+    b = decode(tokens[0], seed=7)
+    save("/tmp/boolian-decoder-as-before.wav", a.flatten().cpu().numpy(), model.sr)
+    save("/tmp/boolian-decoder-graph.wav", b.flatten().cpu().numpy(), model.sr)
+    print("  saved /tmp/boolian-decoder-as-before.wav and /tmp/boolian-decoder-graph.wav to compare by ear")
+
     if not ok:
         print("  FAILED: the flow graphs change the audio; not timing them")
         return
