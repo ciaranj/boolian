@@ -30,7 +30,7 @@ export type Status =
   | { s: "state"; state: ConvState }
   | { s: "conn"; ok: boolean }
   | { s: "latency"; text: string }
-  | { s: "meter"; db: number; thresh: number }
+  | { s: "meter"; db: number; thresh: number | null; voice: number | null; voiceThresh: number }
   | { s: "info"; mic?: string; out?: string; backends?: string }
   | { s: "settings"; settings: Settings }
   | { s: "mics"; mics: { id: string; label: string }[] }

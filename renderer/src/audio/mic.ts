@@ -97,11 +97,14 @@ export class MicInput {
   }
 }
 
+export type VadEvent = "start" | "end" | "abort";
+
 /**
- * Energy VAD with an adaptive noise floor. Only used in "auto" listening mode;
- * push-to-talk is far more reliable around excited trick-or-treaters.
+ * Energy VAD with an adaptive noise floor: the fallback when Silero (silero.ts) can't load, or is switched
+ * off in the operator panel. It can't tell speech from any other loud noise.
  */
 export class EnergyVad {
+  onEvent: (ev: VadEvent) => void = () => {};
   noiseDb = -60;
   speaking = false;
   private speechFrames = 0;
@@ -121,7 +124,12 @@ export class EnergyVad {
     this.speechFrames = this.silenceFrames = this.utterFrames = 0;
   }
 
-  process(db: number): "start" | "end" | "abort" | null {
+  feed(db: number) {
+    const ev = this.process(db);
+    if (ev) this.onEvent(ev);
+  }
+
+  process(db: number): VadEvent | null {
     const isSpeech = db > this.threshold;
     if (!this.speaking) {
       this.noiseDb += (db - this.noiseDb) * (db < this.noiseDb ? 0.1 : 0.01);

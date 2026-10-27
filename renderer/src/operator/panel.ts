@@ -6,7 +6,7 @@ import type { Cmd, Status } from "./bus";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-export const SLIDERS = ["scale", "offsetX", "offsetY", "glow", "volume", "reverb", "extraLatencyMs"] as const;
+export const SLIDERS = ["scale", "offsetX", "offsetY", "glow", "volume", "reverb", "extraLatencyMs", "vadThreshold", "vadPauseMs"] as const;
 
 const pct = (db: number) => `${Math.max(0, Math.min(100, ((db + 80) / 80) * 100))}%`;
 
@@ -80,6 +80,9 @@ export class Panel {
     for (const [name, p] of Object.entries(PALETTES)) palette.add(new Option(p.label, name));
     palette.addEventListener("change", () => run({ c: "settings", patch: { palette: palette.value } }));
 
+    const vadSel = $<HTMLSelectElement>("s-vad");
+    vadSel.addEventListener("change", () => run({ c: "settings", patch: { vad: vadSel.value as Settings["vad"] } }));
+
     const micSel = $<HTMLSelectElement>("s-mic");
     micSel.addEventListener("change", () => run({ c: "settings", patch: { micDevice: micSel.value } }));
 
@@ -132,7 +135,14 @@ export class Panel {
       case "meter":
         if (this.visible) {
           $("mic-meter").style.width = pct(st.db);
-          $("mic-thresh").style.left = pct(st.thresh);
+          $("mic-thresh").hidden = st.thresh === null;
+          if (st.thresh !== null) $("mic-thresh").style.left = pct(st.thresh);
+          $("voice-row").hidden = st.voice === null;
+          if (st.voice !== null) {
+            $("voice-meter").style.width = `${st.voice * 100}%`;
+            $("voice-meter").classList.toggle("on", st.voice >= st.voiceThresh);
+            $("voice-thresh").style.left = `${st.voiceThresh * 100}%`;
+          }
         }
         break;
       case "info":
@@ -168,6 +178,7 @@ export class Panel {
       if (document.activeElement !== el) el.value = String(s[key]);
     }
     $<HTMLSelectElement>("s-palette").value = s.palette;
+    $<HTMLSelectElement>("s-vad").value = s.vad;
     this.micDevice = s.micDevice;
     $<HTMLSelectElement>("s-mic").value = s.micDevice;
     this.autoListen = s.autoListen;

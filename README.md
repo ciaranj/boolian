@@ -103,8 +103,11 @@ All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
 8. Hold Space and say "hello". Check the log and latency readout.
 
 **Running**
-- **Hold Space** while a child talks, then release. This is the most reliable mode. Auto-listen (**V**) works
-  in a quiet room, but groups of excited trick-or-treaters will trigger it constantly.
+- **Hold Space** while a child talks, then release. This is the most reliable mode. Auto-listen (**V**) uses the
+  Silero voice model ([ricky0123/vad](https://github.com/ricky0123/vad)), so bangs, rustling and music don't set it
+  off, but a group of chattering trick-or-treaters still counts as talking. In the operator panel, *Voice
+  threshold* sets how sure it must be that it's hearing speech (lower is more sensitive), and *Pause before reply*
+  sets how long it waits after they stop. *Detect speech by* switches back to the old loudness-only detector.
 - **G** greets the group, which helps because kids don't know they can talk to him. **R** forgets the visitor;
   this also happens automatically after 40 s of quiet.
 - **1–9** play puppet lines, and the "Boolian says" box speaks any typed text in his voice. Both still work if the

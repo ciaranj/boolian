@@ -10,6 +10,9 @@ export interface Settings {
   autoListen: boolean;
   palette: string;
   micDevice: string; // "" = the system default input
+  vad: "silero" | "energy"; // how auto-listen decides someone is talking
+  vadThreshold: number; // Silero speech probability needed (lower = more sensitive)
+  vadPauseMs: number; // quiet after speech before they're taken to have finished
 }
 
 const KEY = "spectre.settings.v1";
@@ -32,6 +35,9 @@ export function loadSettings(): Settings {
     autoListen: false,
     palette: "spectral",
     micDevice: "",
+    vad: "silero",
+    vadThreshold: 0.5,
+    vadPauseMs: 700,
   };
   try {
     Object.assign(s, JSON.parse(localStorage.getItem(KEY) ?? "{}"));

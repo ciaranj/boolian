@@ -15,6 +15,7 @@
     "vite": "6.3.5"
   },
   "dependencies": {
+    "@ricky0123/vad-web": "0.0.31",
     "three": "0.186.1"
   }
 }

@@ -40,7 +40,19 @@
       <section>
         <div class="meter"><div id="mic-meter"></div><div id="mic-thresh"></div></div>
         <small id="mic-info">mic off</small>
+        <div id="voice-row" hidden>
+          <div class="meter"><div id="voice-meter"></div><div id="voice-thresh"></div></div>
+          <small>voice (Silero speech probability)</small>
+        </div>
         <label>Microphone <select id="s-mic"><option value="">System default</option></select></label>
+        <label>Detect speech by
+          <select id="s-vad">
+            <option value="silero">Silero voice model</option>
+            <option value="energy">Loudness only</option>
+          </select>
+        </label>
+        <label>Voice threshold <input type="range" id="s-vadThreshold" min="0.2" max="0.9" step="0.05" /></label>
+        <label>Pause before reply ms <input type="range" id="s-vadPauseMs" min="300" max="1500" step="50" /></label>
       </section>
 
       <section>

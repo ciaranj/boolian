@@ -224,7 +224,18 @@ kbd {
   background: var(--good);
 }
 
-#mic-thresh {
+#voice-meter {
+  height: 100%;
+  width: 0;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+#voice-meter.on {
+  background: var(--good);
+}
+
+#mic-thresh,
+#voice-thresh {
   position: absolute;
   top: 0;
   bottom: 0;

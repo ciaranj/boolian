@@ -1,5 +1,6 @@
-import { EnergyVad, MicInput } from "./audio/mic";
+import { EnergyVad, MicInput, type VadEvent } from "./audio/mic";
 import { AudioOut } from "./audio/output";
+import { SileroVad } from "./audio/silero";
 import { ACTIONS, EMOTIONS, Ghost, type Action, type ConvState, type Emotion } from "./ghost/ghost";
 import { Ghost3D } from "./ghost/ghost3d";
 import { paletteOf } from "./ghost/palettes";
@@ -43,7 +44,10 @@ function startRemote() {
 function startStage() {
   const settings = loadSettings();
   const ghost = new Ghost(Number(q.get("seed")) || Date.now());
-  const vad = new EnergyVad();
+  const energyVad = new EnergyVad();
+  let silero: SileroVad | null = null;
+  let vad: EnergyVad | SileroVad = energyVad;
+  let vadOpen = false; // was the VAD being fed last frame (it's reset when feeding resumes)
   const mic = new MicInput();
 
   let conv: ConvState = "sleeping";
@@ -63,7 +67,7 @@ function startStage() {
   let backends = "";
   const latencies: number[] = [];
   const preRoll: Int16Array[] = [];
-  const PRE_ROLL_FRAMES = 12; // 240 ms, so the first syllable isn't clipped
+  const PRE_ROLL_FRAMES = 30; // 600 ms: Silero only says "start" once it's heard 250 ms of speech
 
   const panel = new Panel(exec);
   bus.onCmd(exec);
@@ -216,6 +220,7 @@ function startStage() {
     capturing = false;
     captureBy = null;
     vad.reset();
+    vadOpen = false;
     report({ s: "talk", on: false });
     if (commit) {
       link.send({ type: "listen_end" });
@@ -235,13 +240,35 @@ function startStage() {
       preRoll.push(pcm);
       if (preRoll.length > PRE_ROLL_FRAMES) preRoll.shift();
     }
-    if (settings.autoListen && (capturing ? captureBy === "vad" : micAllowed())) {
-      const ev = vad.process(db);
-      if (ev === "start") startCapture("vad");
-      else if (ev === "end") stopCapture(true);
-      else if (ev === "abort") stopCapture(false);
-    }
+    const feed = settings.autoListen && (capturing ? captureBy === "vad" : micAllowed());
+    if (feed && !vadOpen) vad.reset(); // don't let stale audio from before Boolian spoke count
+    vadOpen = feed;
+    if (!feed) return;
+    if (vad instanceof EnergyVad) vad.feed(db);
+    else vad.feed(pcm);
   };
+
+  // Silero answers a few ms after the frame, so re-check that listening is still wanted.
+  function onVad(ev: VadEvent) {
+    if (ev === "start") {
+      if (!capturing && settings.autoListen && micAllowed()) startCapture("vad");
+    } else if (captureBy === "vad") {
+      stopCapture(ev === "end");
+    }
+  }
+  energyVad.onEvent = onVad;
+
+  SileroVad.load({ threshold: settings.vadThreshold, pauseMs: settings.vadPauseMs, minSpeechMs: 250, maxUtterMs: 12000 })
+    .then((v) => {
+      silero = v;
+      silero.onEvent = onVad;
+      log("dim", "voice detector: Silero ready");
+      applySettings();
+    })
+    .catch((err) => {
+      console.error(err);
+      log("err", `Silero voice detector failed to load (${(err as Error).message}): using loudness only`);
+    });
 
   // ---------------------------------------------------------------- commands
 
@@ -326,6 +353,7 @@ function startStage() {
       case "auto":
         settings.autoListen = cmd.on;
         vad.reset();
+        vadOpen = false;
         if (!cmd.on && captureBy === "vad") stopCapture(false);
         saveAndApply();
         log("dim", `auto-listen ${cmd.on ? "on" : "off"}`);
@@ -380,6 +408,15 @@ function startStage() {
     out.setVolume(settings.volume);
     out.setReverb(settings.reverb);
     out.extraLatencyMs = settings.extraLatencyMs;
+    energyVad.opts.endSilenceMs = settings.vadPauseMs;
+    silero?.setOptions({ threshold: settings.vadThreshold, pauseMs: settings.vadPauseMs });
+    const want = settings.vad === "silero" && silero ? silero : energyVad;
+    if (want !== vad) {
+      if (captureBy === "vad") stopCapture(false);
+      vad = want;
+      vad.reset();
+      vadOpen = false;
+    }
   }
 
   // ---------------------------------------------------------------- waking up (audio unlock)
@@ -514,7 +551,11 @@ function startStage() {
 
     frames++;
     if (now - meterT > 100) {
-      report({ s: "meter", db: mic.db, thresh: vad.threshold });
+      report(
+        vad instanceof EnergyVad
+          ? { s: "meter", db: mic.db, thresh: energyVad.threshold, voice: null, voiceThresh: 0 }
+          : { s: "meter", db: mic.db, thresh: null, voice: vad.prob, voiceThresh: vad.threshold },
+      );
       meterT = now;
       const blocker = settings.autoListen && awake && mic.running && !capturing ? autoBlocker() : null;
       if (!blocker || conv === "speaking" || conv === "thinking") autoBlockedSince = 0;
