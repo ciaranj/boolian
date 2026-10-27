@@ -97,6 +97,9 @@ def clean_for_speech(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+_FIRST_CLAUSE_END = re.compile(r"[,;:] | - | — ")
+
+
 class ReplyParser:
     """Turns a stream of LLM tokens into an Expression followed by speakable sentences.
 
@@ -105,10 +108,12 @@ class ReplyParser:
 
     MIN_SENTENCE = 12
     LONG_CLAUSE = 110
+    FIRST_CLAUSE = 20  # the first chunk may end at a comma, so speech starts a few tokens sooner
 
     def __init__(self) -> None:
         self._buf = ""
         self._tag_done = False
+        self._started = False
 
     def feed(self, token: str) -> list[Expression | Sentence]:
         self._buf += token
@@ -164,8 +169,13 @@ class ReplyParser:
                 comma = max(self._buf.rfind(", "), self._buf.rfind("; "))
                 if comma > self.MIN_SENTENCE:
                     cut = comma + 2
+            if cut is None and not self._started:
+                m = _FIRST_CLAUSE_END.search(self._buf, self.FIRST_CLAUSE)
+                if m:
+                    cut = m.end()
             if cut is None:
                 break
+            self._started = True
             out.extend(self._emit(self._buf[:cut]))
             self._buf = self._buf[cut:]
         if final and self._buf.strip():

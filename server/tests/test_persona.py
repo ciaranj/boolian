@@ -47,3 +47,12 @@ def test_clean_for_speech():
 def test_safety():
     assert is_unsafe("let's go get some beer")
     assert not is_unsafe("I love pumpkin pie and spooky stories")
+
+
+def test_first_chunk_can_end_at_a_comma():
+    events = run(list("[happy:none] I have been drifting around these halls, for oh so long, and I love it. Truly, madly, deeply."))
+    assert [e.text for e in events[1:]] == [
+        "I have been drifting around these halls,",
+        "for oh so long, and I love it.",
+        "Truly, madly, deeply.",
+    ]

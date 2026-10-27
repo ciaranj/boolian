@@ -95,8 +95,10 @@ cmd_run() {
   log "Serving ${model_args[1]} on 0.0.0.0:${LLM_PORT:-8080}"
   # --parallel 1: one conversation at a time, all the KV cache for it. --jinja: model's own chat template.
   # No thinking (a reasoning preamble would cost seconds per reply) and no vision projector (wasted VRAM).
+  # --swa-full: Gemma's sliding-window cache otherwise makes reusing the cached system prompt slower
+  # than reprocessing it (~400 ms per turn); the full cache costs little VRAM at 4k context.
   exec "$bin" "${model_args[@]}" --host 0.0.0.0 --port "${LLM_PORT:-8080}" \
-    -ngl 99 -c "${LLM_CTX:-4096}" --parallel 1 --jinja --no-mmproj \
+    -ngl 99 -c "${LLM_CTX:-4096}" --parallel 1 --jinja --no-mmproj --swa-full \
     --chat-template-kwargs '{"enable_thinking":false}'
 }
 
