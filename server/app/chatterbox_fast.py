@@ -17,7 +17,8 @@ The audio decoder (S3Gen) has the same problem: its two flow-matching steps were
 ~130 ms decode, with the GPU busy for under a third of it (~5,500 kernel launches per sentence).
 FlowGraphs records the flow network as CUDA graphs for padded lengths. Padding is exact for this
 network: causal convolutions, per-frame LayerNorm, no resampling along time (one channel level),
-and attention that masks padded frames out completely.
+and attention that masks padded frames out completely. That holds bit for bit with cuDNN's TF32
+off (prepare() turns it off); with it on, the algorithm cuDNN picks per length decides the rounding.
 
 (bf16 was tried: no faster, and audibly worse, so everything stays in fp32.)
 """
@@ -57,9 +58,16 @@ def prepare(model) -> None:
         except Exception:
             log.exception("couldn't capture CUDA graphs; using the plain loop")
             _graph_broken = True
-        # FlowGraphs (the audio decoder as CUDA graphs) isn't installed here yet: in bench-chatterbox
-        # --decoder it changed one short sentence's audio (largest sample difference 0.02 against a 0.31
-        # peak) while matching longer ones exactly. Until that's understood, the decoder runs as before.
+        # Full fp32 convolutions. PyTorch lets cuDNN use TF32 by default, depending on the algorithm it
+        # picks for each input length, so a padded graph and an unpadded run could round differently
+        # (~3e-3). With TF32 off the flow graphs match the normal path exactly, and the audio is a
+        # little more precise than with TF32 (which moved it by ~1.5e-2). Matmuls already default to fp32.
+        torch.backends.cudnn.allow_tf32 = False
+        try:
+            with torch.inference_mode():
+                FlowGraphs.install(model)
+        except Exception:
+            log.exception("couldn't capture the audio decoder's CUDA graphs; it runs as before")
 
 
 def watermarker_to(model, device) -> None:
