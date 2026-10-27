@@ -408,11 +408,23 @@ def stream_compare(model) -> None:
             b.push(raw[:k], finalize=False)
         b.push(final, finalize=True)
         w, st = np.concatenate(whole), np.concatenate(streamed)
-        n = min(len(w), len(st))
-        err = w[:n] - st[:n]
-        snr = 20 * np.log10(np.sqrt(np.mean(w[:n] ** 2)) / max(np.sqrt(np.mean(err ** 2)), 1e-12))
-        print(f"    {i}: {len(w) / model.sr:4.1f}s in {len(streamed)} pieces | lengths {len(w)} vs {len(st)} samples | "
-              f"largest difference {np.abs(err).max():.3f}, signal-to-difference {snr:4.1f} dB")
+        # Clicks show up as a sudden sample-to-sample jump. Compare the biggest jump within 5 ms of each join
+        # with the biggest anywhere else, and with the whole sentence at the same places. (Comparing the
+        # waveforms directly means little: after a join the vocoder's phase can differ while sounding the same.)
+        joins = np.cumsum([len(p) for p in streamed])[:-1]
+        jump_s, jump_w = np.abs(np.diff(st)), np.abs(np.diff(w))
+        near = np.zeros(len(jump_s), dtype=bool)
+        for j in joins:
+            near[max(0, j - 120): j + 120] = True
+        if len(joins):
+            at_joins, elsewhere = jump_s[near].max(), jump_s[~near].max()
+            whole_there = jump_w[near[: len(jump_w)]].max()
+            verdict = "a click is likely" if at_joins > 1.5 * max(elsewhere, whole_there) else "joins look clean"
+            joins_txt = (f"biggest jump at a join {at_joins:.3f}, elsewhere {elsewhere:.3f}, "
+                         f"whole sentence at the same spots {whole_there:.3f}: {verdict}")
+        else:
+            joins_txt = "one piece, no joins"
+        print(f"    {i}: {len(w) / model.sr:4.1f}s in {len(streamed)} pieces ({len(w)} vs {len(st)} samples) | {joins_txt}")
         save(f"/tmp/boolian-stream-{i}-whole.wav", w, model.sr)
         save(f"/tmp/boolian-stream-{i}-streamed.wav", st, model.sr)
     print("  saved /tmp/boolian-stream-N-whole.wav and -streamed.wav: listen for clicks or wobbles at the joins")

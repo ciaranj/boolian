@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import logging
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -368,7 +369,7 @@ class StreamDecoder:
         self.prompt_tokens = model.conds.gen["prompt_token"].shape[1]  # the reference clip's tokens
         dev, dt = s3.device, s3.dtype
         self.noise = torch.randn(1, 80, self.ratio * (self.prompt_tokens + 1100), device=dev, dtype=dt)
-        self.window = torch.hamming_window(2 * MEL_OVERLAP * SAMPLES_PER_FRAME, periodic=False, device=dev, dtype=dt)
+        self.window = np.hamming(2 * MEL_OVERLAP * SAMPLES_PER_FRAME).astype(np.float32)  # CosyVoice's crossfade
         self.emitted = 0  # mel frames (after the reference clip) already sent to the vocoder
         self.carry = None  # the vocoder's overlap from the previous piece
         self.started = False
@@ -389,34 +390,41 @@ class StreamDecoder:
             return
         mel = self.mel(toks)
         upto = mel.shape[2] if finalize else mel.shape[2] - lookahead - STREAM_HOLD
-        new = mel[:, :, self.emitted:max(upto, self.emitted)]
-        self.emitted = max(upto, self.emitted)
-        if new.shape[2] or (finalize and self.carry is not None):
-            self._vocode(new, finalize)
+        if not finalize and upto < self.emitted + MEL_OVERLAP:
+            return  # not enough new audio yet to be worth a piece
+        upto = max(upto, self.emitted)
+        # The overlap frames come from this same decode, so the vocoder sees one continuous spectrogram;
+        # earlier decodes' versions of them differ slightly, which would make a step where the fade ends.
+        start = self.emitted - MEL_OVERLAP if self.carry is not None else self.emitted
+        self.emitted = upto
+        if upto > start:
+            self._vocode(mel[:, :, start:upto], finalize)
 
     def _vocode(self, mel, finalize: bool) -> None:
         s3 = self.model.s3gen
+        overlap = MEL_OVERLAP * SAMPLES_PER_FRAME
         if self.carry is not None:
-            mel = torch.cat([self.carry["mel"], mel], dim=2)
-            source = self.carry["source"]
+            source = self.carry["source"]  # the excitation for the overlap frames, so the phase carries on
         else:
             source = torch.zeros(1, 1, 0, device=mel.device, dtype=mel.dtype)
         speech, source = s3.mel2wav.inference(speech_feat=mel, cache_source=source)
-        overlap = MEL_OVERLAP * SAMPLES_PER_FRAME
-        if self.carry is not None:
-            speech[:, :overlap] = speech[:, :overlap] * self.window[:overlap] + self.carry["speech"] * self.window[overlap:]
-        if finalize:
-            self.carry = None
-        else:
-            self.carry = {"mel": mel[:, :, -MEL_OVERLAP:], "source": source[:, :, -overlap:],
-                          "speech": speech[:, -overlap:]}
-            speech = speech[:, :-overlap]
         if not self.started:  # S3Gen silences and fades in the first 40 ms of a sentence
             speech[:, : len(s3.trim_fade)] *= s3.trim_fade
             self.started = True
-        wav = speech.squeeze(0).detach().cpu().numpy()
+        # Watermark the whole piece, overlap tail included, before crossfading: the watermark works on a
+        # spectrogram, so its own edges would click where pieces meet; inside a crossfade they're faded out.
+        raw = speech.squeeze(0).detach().cpu().numpy()
+        wav = np.asarray(self.model.watermarker.apply_watermark(raw, sample_rate=self.model.sr), dtype=np.float32)
+        wav = np.pad(wav, (0, max(0, len(raw) - len(wav))))[: len(raw)]  # in case it resampled to a new length
+        if self.carry is not None:
+            wav[:overlap] = wav[:overlap] * self.window[:overlap] + self.carry["speech"] * self.window[overlap:]
+        if finalize:
+            self.carry = None
+        else:
+            self.carry = {"source": source[:, :, -overlap:], "speech": wav[-overlap:].copy()}
+            wav = wav[:-overlap]
         if wav.size:
-            self.emit(self.model.watermarker.apply_watermark(wav, sample_rate=self.model.sr))
+            self.emit(wav)
 
 
 @torch.inference_mode()
