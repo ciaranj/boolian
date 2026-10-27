@@ -49,17 +49,26 @@ GREETINGS = [
     ("surprised", "bounce", "Well hello! I didn't hear you float in. I'm Boolian. What are you dressed as tonight?"),
     ("happy", "spin", "Happy Halloween! I'm Boolian the ghost. Come closer, I don't bite. I don't even have teeth!"),
     ("curious", "tilt", "Ooh, trick-or-treaters! I'm Boolian. Have you got any good sweets yet?"),
+    ("surprised", "hide", "Eek! Oh, it's only you. You gave me a fright! I'm Boolian, and I'm supposed to be the scary one."),
+    ("happy", "peek", "Psst! Over here! Yes, you! I'm Boolian, the friendliest ghost on the street. Happy Halloween!"),
+    ("mischievous", "spin", "Wooooo! I am the terrifying ghost Boolian! [chuckle] Sorry, I can never keep a straight face."),
+    ("curious", "bounce", "Hello, hello! I'm Boolian. Who's come to visit me tonight?"),
 ]
 
 REPEAT_LINES = [
     ("confused", "tilt", "Pardon? My ears are a bit foggy tonight. Could you say that again?"),
     ("confused", "none", "Ooh, I missed that one. Say it again, a little louder for an old ghost?"),
     ("curious", "tilt", "Sorry, the wind howled right over you. What was that?"),
+    ("confused", "tilt", "Eh? A bat flapped past my ear just then. One more time?"),
+    ("curious", "peek", "Ooh, I only caught a whisper of that. Can you say it again, nice and loud?"),
+    ("confused", "none", "My ghostly ears must be full of cobwebs. Could you say that again?"),
 ]
 
 FALLBACK_LINES = [
     ("confused", "none", "Hmm, I've completely forgotten what I was going to say. Happens a lot after 173 years!"),
     ("mischievous", "none", "Oops, my brain went all misty for a moment. Ask me something else?"),
+    ("confused", "tilt", "Oh dear, I floated right out of my own head for a second. What else shall we talk about?"),
+    ("surprised", "none", "Whoops! A gust of wind blew my thoughts away. Try asking me something else?"),
 ]
 
 # Said when he's spoken and nobody has answered for a while (the last one when he gives up).
@@ -67,10 +76,16 @@ NUDGE_LINES = [
     ("curious", "peek", "Hellooo? Is anybody still there? Don't be shy!"),
     ("curious", "tilt", "Hmm, you've gone very quiet. Did I scare you? Please say I scared you!"),
     ("mischievous", "bounce", "Go on, ask me anything. I know all the best ghost secrets!"),
+    ("curious", "peek", "Are you hiding from me? That's my job! Come out, come out!"),
+    ("happy", "bounce", "Don't be scared. I'm only a little bit see-through! What's your name?"),
+    ("mischievous", "tilt", "[whispering] Psst. I've got a secret. Ask me what it is!"),
+    ("curious", "tilt", "Hellooo? Did the cat get your tongue? Ghosts love a good chat!"),
 ]
 LONELY_LINES = [
     ("neutral", "none", "Oh well. I'll just float here and practise my spooky faces then."),
     ("confused", "tilt", "Gone already? Ghosts get so lonely. Come back soon!"),
+    ("neutral", "none", "[sigh] Nobody there? I'll just haunt quietly by myself then."),
+    ("happy", "none", "Oh, they must have gone to find more sweets. Happy Halloween, wherever you are!"),
 ]
 
 _GOODBYE = re.compile(
