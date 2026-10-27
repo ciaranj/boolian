@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
 EMOTIONS = ("neutral", "happy", "curious", "surprised", "mischievous", "confused")
 ACTIONS = ("none", "bounce", "tilt", "spin", "hide", "peek")
@@ -18,8 +19,31 @@ never more than one per reply.
 Example: [mischievous:peek] Shall I tell you a secret? [whispering] I'm scared of the dark. [chuckle]"""
 
 
-def system_prompt(name: str, sounds: bool = False) -> str:
-    return f"""You are {name}, a friendly cartoon ghost haunting the front of a house on Halloween night.
+def time_of_day(hour: int) -> str:
+    """Rough, so the prompt only changes a few times a night (llama-server reuses work on an unchanged prefix)."""
+    if 5 <= hour < 12:
+        return "morning"
+    if hour < 17:
+        return "afternoon"
+    if hour < 19:
+        return "early evening"
+    if hour < 21:
+        return "evening"
+    if hour < 23:
+        return "getting late, past many children's bedtime"
+    return "the middle of the night"
+
+
+def when(now: datetime) -> str:
+    day = f"{now:%A} {now.day} {now:%B %Y}"
+    if (now.month, now.day) == (10, 31):
+        day += ", Halloween"
+    return f"\nToday is {day}. It is {time_of_day(now.hour)}."
+
+
+def system_prompt(name: str, sounds: bool = False, now: datetime | None = None) -> str:
+    """`now` adds the date and rough time of day; it goes last, so the rest of the prompt stays cached."""
+    return f"""You are {name}, a friendly cartoon ghost haunting the front of a house at Halloween.
 You have haunted this place for 173 years and are spectacularly bad at being scary.
 You are British: say sweets, mum and favourite, never candy, mom or favorite.
 You are also warm, playful, curious, theatrical and a little forgetful.
@@ -52,7 +76,7 @@ Examples:
 [curious:tilt] Fizzy worms? I've never tasted one. Do they wriggle?
 [surprised:hide] Eek! Oh, it was only you. Hello again!""" + (
         _SOUNDS_PROMPT if sounds else ""
-    )
+    ) + (when(now) if now else "")
 
 
 GREETINGS = [

@@ -13,6 +13,7 @@ import random
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 
 from . import persona
 from .config import Config
@@ -284,7 +285,7 @@ class Conversation:
                 turns.append(dict(m))
         if turns and turns[0]["role"] == "assistant":
             turns.insert(0, {"role": "user", "content": "(Some visitors float up to you.)"})
-        return [{"role": "system", "content": persona.system_prompt(self.cfg.ghost_name, sounds=self.tts.sound_tags)}, *turns]
+        return [{"role": "system", "content": persona.system_prompt(self.cfg.ghost_name, sounds=self.tts.sound_tags, now=datetime.now())}, *turns]
 
     async def _produce(self, gen: int, timing: TurnTiming, messages: list[dict], queue: asyncio.Queue, reply: dict) -> None:
         parser = ReplyParser(eager_first=self.tts.whole_sentences)

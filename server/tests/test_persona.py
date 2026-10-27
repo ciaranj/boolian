@@ -92,3 +92,16 @@ def test_goodbyes():
         assert is_goodbye(text), text
     for text in ["I'm a bee", "maybe", "I'm going as a witch", "what's your favourite sweet?", "Happy Halloween"]:
         assert not is_goodbye(text), text
+
+
+def test_date_and_rough_time_of_day():
+    from datetime import datetime
+
+    from app.persona import system_prompt
+
+    p = system_prompt("Boolian", now=datetime(2026, 10, 31, 18, 47))
+    assert p.endswith("Today is Saturday 31 October 2026, Halloween. It is early evening.")
+    # Same prompt all through each period, so the LLM's cached prefix survives.
+    assert system_prompt("Boolian", now=datetime(2026, 10, 31, 19, 1)) == system_prompt("Boolian", now=datetime(2026, 10, 31, 20, 59))
+    assert "bedtime" in system_prompt("Boolian", now=datetime(2026, 10, 31, 21, 30))
+    assert system_prompt("Boolian", now=datetime(2026, 10, 27, 20, 0)).endswith("Today is Tuesday 27 October 2026. It is evening.")
