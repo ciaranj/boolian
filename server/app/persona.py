@@ -86,7 +86,11 @@ def is_goodbye(text: str) -> bool:
 
 
 # Said the instant a visitor stops talking, while a slow voice prepares the real reply.
-FILLER_LINES = ["Ooooh!", "Hmm, ooh...", "[chuckle] Ooh!", "Hmmm...", "Ooh, ooh!"]
+# They come before he knows what was said, so each must suit any reply.
+FILLER_LINES = [
+    "Ooooh!", "Hmm, ooh...", "[chuckle] Ooh!", "Hmmm...", "Wooooo...", "Oh-ho!", "Well, well, well...",
+    "Ahh, now then...", "[gasp] Ooh!", "Hmm, let me see...", "Oh my...", "Mmm, now...",
+]
 
 SAFE_REDIRECT = ("happy", "spin", "Ooh, let's talk about something more fun. What's your favourite Halloween sweet?")
 
