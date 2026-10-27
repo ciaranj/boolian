@@ -161,6 +161,14 @@ export class AudioOut {
     this.checkDone();
   }
 
+  /** A new server connection numbers its replies from 1 again, so forget the old connection's numbers
+   * (otherwise every new reply looks stale and is silently dropped). */
+  newConnection() {
+    this.cancel();
+    this.gen = -1;
+    this.rejectUpTo = -1;
+  }
+
   /** Stop playback of `gen` (or whatever is playing) and reject any of its late chunks. */
   cancel(gen?: number) {
     const target = gen ?? this.gen;

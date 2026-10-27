@@ -115,6 +115,7 @@ function startStage() {
       if (!speakingLocally) setConv("sleeping");
       log("dim", "server disconnected");
     } else {
+      out.newConnection();
       log("dim", "server connected");
       if (awake) setConv("idle");
     }
