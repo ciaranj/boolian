@@ -7,7 +7,9 @@ speech), and most of each 20 ms step is Python/Hugging Face overhead launching ~
 GPU kernels one by one, not GPU work. So:
 - GraphDecoder runs the GPT-2 with a fixed-size KV cache and records one decoding step as a CUDA
   graph, replayed per token as a single launch. Same weights and maths; it reuses each layer's own
-  modules and only replaces Hugging Face's growing cache;
+  modules and only replaces Hugging Face's growing cache. There is one graph per attention span
+  (SPANS), and each token uses the smallest that covers it: with only the full-size cache, every
+  token read ~0.3 GB of masked-out cache on top of the 1.24 GB of weights;
 - sampling works on the top-k slice, instead of sorting the whole vocabulary every step;
 - the stop token is checked every few steps, so the CPU doesn't wait on the GPU after every token.
 
@@ -25,7 +27,9 @@ log = logging.getLogger("spectre.chatterbox")
 
 STOP_CHECK_EVERY = 8  # steps between CPU checks for the stop token (up to 7 wasted steps per sentence)
 OOV_FROM = 6561  # speech tokens at or above this (start/stop) aren't audio, as in the original
-MAX_LEN = 1536  # KV cache positions: ~440 of prompt (voice + text) leaves room for 1000 speech tokens
+# Attention spans with a recorded graph. The prompt (voice + text) is ~440 positions, so sentences
+# start in the 512 graph; the largest leaves room for ~1000 speech tokens, the original's limit.
+SPANS = (512, 640, 768, 896, 1024, 1280, 1536)
 
 _graph_broken = False  # set if capture ever fails; we then fall back to the plain loop
 
@@ -35,8 +39,15 @@ def prepare(model) -> None:
 
     Chatterbox builds its (Resemble Perth) watermarker on the CPU, where it runs a neural network
     over every sentence. Moving it to the GPU keeps the watermark, it just stops costing CPU time."""
+    global _graph_broken
     if str(model.device).startswith("cuda"):
         watermarker_to(model, model.device)
+        try:
+            with torch.inference_mode():
+                _decoder(model.t3).capture_all()
+        except Exception:
+            log.exception("couldn't capture CUDA graphs; using the plain loop")
+            _graph_broken = True
 
 
 def watermarker_to(model, device) -> None:
@@ -48,7 +59,7 @@ def watermarker_to(model, device) -> None:
 class GraphDecoder:
     """GPT-2 decoding for T3 with a static KV cache; each token is one CUDA graph replay."""
 
-    def __init__(self, t3, max_len: int = MAX_LEN):
+    def __init__(self, t3, spans: tuple[int, ...] = SPANS):
         tf = t3.tfmr
         cfg = tf.config
         # The attention below is plain scaled dot-product; refuse configs where GPT-2 does anything else.
@@ -58,7 +69,8 @@ class GraphDecoder:
         self.heads = cfg.n_head
         self.head_dim = cfg.n_embd // cfg.n_head
         self.scale = self.head_dim**-0.5
-        self.max_len = max_len
+        self.spans = spans
+        self.max_len = max_len = spans[-1]
         dev, dt = t3.device, tf.dtype
         shape = (len(tf.h), 1, self.heads, max_len, self.head_dim)
         self.k = torch.zeros(shape, device=dev, dtype=dt)
@@ -66,21 +78,22 @@ class GraphDecoder:
         self.slots = torch.arange(max_len, device=dev)
         self.tok = torch.zeros((1, 1), dtype=torch.long, device=dev)
         self.pos = torch.zeros((1,), dtype=torch.long, device=dev)  # where the next token goes
-        self.graph: torch.cuda.CUDAGraph | None = None
-        self.logits: torch.Tensor | None = None
+        self.n = 0  # the same, on the CPU, to pick a span without waiting on the GPU
+        self.graphs: dict[int, tuple[torch.cuda.CUDAGraph, torch.Tensor]] = {}
 
-    def _layers(self, x, positions, prefill: bool):
-        """x (1, T, C) at cache slots `positions` (T,). Returns speech logits for the last position."""
-        mask = None if prefill else (self.slots <= positions[0]).view(1, 1, 1, -1)
+    def _layers(self, x, positions, span: int | None):
+        """x (1, T, C) at cache slots `positions` (T,); span=None for the prompt. Returns last-position logits."""
+        mask = None if span is None else (self.slots[:span] <= positions[0]).view(1, 1, 1, -1)
         for i, blk in enumerate(self.tf.h):
             q, k, v = blk.attn.c_attn(blk.ln_1(x)).split(self.width, dim=2)
             q, k, v = (t.view(1, -1, self.heads, self.head_dim).transpose(1, 2) for t in (q, k, v))
             self.k[i].index_copy_(2, positions, k)
             self.v[i].index_copy_(2, positions, v)
-            if prefill:  # the prompt only attends to itself, causally (no stale slots involved)
+            if span is None:  # the prompt only attends to itself, causally (no stale slots involved)
                 a = F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=self.scale)
             else:
-                a = F.scaled_dot_product_attention(q, self.k[i], self.v[i], attn_mask=mask, scale=self.scale)
+                ks, vs = self.k[i][:, :, :span], self.v[i][:, :, :span]
+                a = F.scaled_dot_product_attention(q, ks, vs, attn_mask=mask, scale=self.scale)
             x = x + blk.attn.c_proj(a.transpose(1, 2).reshape(1, -1, self.width))
             x = x + blk.mlp(blk.ln_2(x))
         return self.t3.speech_head(self.tf.ln_f(x[:, -1]))
@@ -89,36 +102,55 @@ class GraphDecoder:
         """Run the prompt (1, T, C); returns logits (1, V) for the first speech token."""
         n = embeds.shape[1]
         positions = self.slots[:n]
-        logits = self._layers(embeds + self.tf.wpe(positions), positions, prefill=True)
+        logits = self._layers(embeds + self.tf.wpe(positions), positions, span=None)
         self.pos.fill_(n)
+        self.n = n
         return logits
 
-    def _step(self):
+    def _step(self, span: int):
         x = self.t3.speech_emb(self.tok) + self.tf.wpe(self.pos)
-        return self._layers(x, self.pos, prefill=False)
+        return self._layers(x, self.pos, span)
+
+    def span_for(self, n: int) -> int:
+        """The smallest recorded span that includes slot n."""
+        return next(s for s in self.spans if s > n)
 
     def step(self, tok):
         """Feed one token (0-dim, on the GPU); returns logits (1, V) for the next. Valid until the next call."""
         self.tok.copy_(tok.view(1, 1))
-        if self.graph is None:
-            self._capture()
-        self.graph.replay()
+        graph, logits = self.graph_for(self.span_for(self.n))
+        graph.replay()
         self.pos += 1
-        return self.logits
+        self.n += 1
+        return logits
 
-    def _capture(self):
+    def graph_for(self, span: int) -> tuple[torch.cuda.CUDAGraph, torch.Tensor]:
+        if span not in self.graphs:
+            self._capture(span)
+        return self.graphs[span]
+
+    def capture_all(self) -> None:
+        """Record every span up front, between sentences: capture writes cache slot `pos`, so start from
+        slot 0, which the next prompt overwrites anyway."""
+        self.pos.zero_()
+        self.n = 0
+        for span in self.spans:
+            self.graph_for(span)
+        log.info("Chatterbox decoding steps captured as CUDA graphs for spans %s", ", ".join(map(str, self.spans)))
+
+    def _capture(self, span: int) -> None:
         # Warm up on a side stream (allocations, cuBLAS handles), then record. Warm-up writes the same
-        # cache slot the replay will, with the same values, so it doesn't disturb the sentence.
+        # cache slot the replay will, with the same values, so it doesn't disturb a sentence in progress.
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             for _ in range(2):
-                self._step()
+                self._step(span)
         torch.cuda.current_stream().wait_stream(s)
-        self.graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.graph):
-            self.logits = self._step()
-        log.info("Chatterbox decoding step captured as a CUDA graph")
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            logits = self._step(span)
+        self.graphs[span] = (graph, logits)
 
 
 def _decoder(t3) -> GraphDecoder:

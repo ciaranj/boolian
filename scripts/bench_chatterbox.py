@@ -118,7 +118,10 @@ def per_token_cost(model, label: str) -> None:
     tok = torch.tensor(42, device=model.device)
     dec = chatterbox_fast._decoder(t3)
     dec.prefill(embeds)
-    dec.step(tok)  # captured by now
+    dec.step(tok)
+    span = dec.span_for(dec.n)
+    graph, logits = dec.graph_for(span)
+    full_graph, _ = dec.graph_for(dec.max_len)
 
     def ms_per_call(fn, n=100):
         fn()
@@ -129,9 +132,10 @@ def per_token_cost(model, label: str) -> None:
         torch.cuda.synchronize()
         return (time.perf_counter() - t) / n * 1000
 
-    graph_ms = ms_per_call(dec.graph.replay)
+    graph_ms = ms_per_call(graph.replay)
     state = gpu_state()  # sampled straight after sustained load
-    logits, seen = dec.logits[0], torch.zeros(dec.logits.shape[-1], dtype=torch.bool, device=model.device)
+    full_ms = ms_per_call(full_graph.replay)
+    logits, seen = logits[0], torch.zeros(logits.shape[-1], dtype=torch.bool, device=model.device)
     sample_ms = ms_per_call(lambda: chatterbox_fast._sample(logits, seen, 0.8, 1000, 0.95, 1.2))
     out = t3.tfmr(inputs_embeds=embeds, use_cache=True)
     past, emb = out.past_key_values, t3.speech_emb(tok.view(1, 1))
@@ -139,8 +143,9 @@ def per_token_cost(model, label: str) -> None:
 
     weights = [*t3.tfmr.h.parameters(), *t3.tfmr.ln_f.parameters(), *t3.speech_head.parameters()]
     gb = sum(p.numel() * p.element_size() for p in weights) / 1e9
-    print(f"  {label}: GPU work per token (graph replay) {graph_ms:5.1f} ms, reading {gb:.2f} GB = "
-          f"{gb / graph_ms * 1000:4.0f} GB/s | sampling {sample_ms:4.1f} ms | Hugging Face step {hf_ms:5.1f} ms")
+    print(f"  {label}: GPU work per token (graph replay) {graph_ms:5.1f} ms attending to {span} positions "
+          f"({full_ms:5.1f} ms to all {dec.max_len}), weights {gb:.2f} GB = {gb / graph_ms * 1000:4.0f} GB/s | "
+          f"sampling {sample_ms:4.1f} ms | Hugging Face step {hf_ms:5.1f} ms")
     print(f"  {' ' * len(label)}  GPU during that: {state}")
 
 
@@ -171,7 +176,8 @@ def check_decoder(model) -> bool:
     text = model.tokenizer(punc_norm(LINES[1]), return_tensors="pt").input_ids.to(model.device)
     start = torch.full_like(text[:, :1], t3.hp.start_speech_token)
     embeds, _ = t3.prepare_input_embeds(t3_cond=model.conds.t3, text_tokens=text, speech_tokens=start, cfg_weight=0.0)
-    forced = torch.randint(0, chatterbox_fast.OOV_FROM, (40,), device=model.device,
+    # Enough tokens to cross from one recorded attention span into the next (prompt ~400 + 200).
+    forced = torch.randint(0, chatterbox_fast.OOV_FROM, (200,), device=model.device,
                            generator=torch.Generator(model.device).manual_seed(1))
 
     out = t3.tfmr(inputs_embeds=embeds, use_cache=True)
@@ -183,14 +189,17 @@ def check_decoder(model) -> bool:
 
     dec = chatterbox_fast._decoder(t3)
     got = [dec.prefill(embeds).clone()]
+    spans = [dec.span_for(dec.n)]
     for tok in forced:
         got.append(dec.step(tok).clone())
+        spans.append(dec.span_for(dec.n))
 
     ref_t, got_t = torch.cat(ref), torch.cat(got)
     diff = float((ref_t - got_t).abs().max())
     scale = float(ref_t.abs().max())
     same_top = int((ref_t.argmax(-1) == got_t.argmax(-1)).sum())
-    print(f"  {len(ref)} steps: largest logit difference {diff:.2e} (logits up to {scale:.1f}), "
+    print(f"  {len(ref)} steps from a {embeds.shape[1]}-position prompt, through attention spans "
+          f"{sorted(set(spans))}: largest logit difference {diff:.2e} (logits up to {scale:.1f}), "
           f"same top token {same_top}/{len(ref)}")
     return diff < 1e-2 * max(scale, 1.0) and same_top == len(ref)
 
