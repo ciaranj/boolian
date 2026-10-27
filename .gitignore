@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+infra/models/
+*.wav
+.DS_Store
+*.egg-info/
+spectre.env
+llm.env

@@ -1,0 +1,54 @@
+# VM stack: llama.cpp + Kokoro + Spectre. Run from this directory:
+#   docker compose up -d && docker compose logs -f spectre
+# Put the GGUF model at infra/models/model.gguf first (see README).
+#
+# Pin image tags before Halloween night: replace the floating tags below with the exact
+# versions you tested (`docker compose images` shows what you pulled).
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  llm:
+    <<: *gpu
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    command: >
+      -m /models/model.gguf --host 0.0.0.0 --port 8080
+      -ngl 99 -c 4096 --jinja --parallel 1
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - "127.0.0.1:8080:8080" # localhost only: never expose the LLM to the LAN
+    restart: unless-stopped
+
+  tts:
+    <<: *gpu
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.4
+    ports:
+      - "127.0.0.1:8880:8880"
+    restart: unless-stopped
+
+  spectre:
+    <<: *gpu
+    build: ../server
+    environment:
+      SPECTRE_LLM_URL: http://llm:8080/v1
+      SPECTRE_TTS_URL: http://tts:8880/v1
+      SPECTRE_STT_MODEL: large-v3-turbo
+      SPECTRE_TTS_VOICE: bm_fable
+      SPECTRE_AUTH_TOKEN: ${SPECTRE_AUTH_TOKEN:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface # Whisper weights survive restarts
+    ports:
+      - "8765:8765" # the MacBook connects here
+    depends_on: [llm, tts]
+    restart: unless-stopped
+
+volumes:
+  hf-cache:

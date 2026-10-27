@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boolian</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+
+    <div id="wake">
+      <button id="wake-btn">Click to wake the ghost</button>
+      <p>Enter also works · O toggles the operator panel</p>
+    </div>
+
+    <div id="conn-dot" title="Server disconnected"></div>
+
+    <aside id="panel" hidden>
+      <header>
+        <strong>Spectre operator</strong>
+        <span id="conn" class="pill bad">offline</span>
+        <span id="state" class="pill">sleeping</span>
+      </header>
+
+      <p id="awake-note" class="note">The stage window is asleep: click it once (or press Enter there) to unlock audio and the mic.</p>
+
+      <section class="row wrap">
+        <button data-cmd="greet" title="G">Greet <kbd>G</kbd></button>
+        <button data-cmd="reset" title="R">Forget visitor <kbd>R</kbd></button>
+        <button data-cmd="cancel" title="X">Stop talking <kbd>X</kbd></button>
+        <button data-cmd="mute" id="mute-btn">Mute <kbd>M</kbd></button>
+      </section>
+
+      <section class="row">
+        <button id="talk-btn" class="talk">Hold to listen <kbd>Space</kbd></button>
+        <label class="toggle"><input type="checkbox" id="auto-listen" /> Auto-listen <kbd>V</kbd></label>
+      </section>
+
+      <section>
+        <div class="meter"><div id="mic-meter"></div><div id="mic-thresh"></div></div>
+        <small id="mic-info">mic off</small>
+      </section>
+
+      <section>
+        <h3>Visitor says (typed)</h3>
+        <form id="ask-form" class="row"><input id="ask" placeholder="What's your name?" autocomplete="off" /><button>Ask</button></form>
+      </section>
+
+      <section>
+        <h3>Boolian says (puppet)</h3>
+        <form id="say-form" class="row">
+          <input id="say" placeholder="Type a line for Boolian…" autocomplete="off" />
+          <button>Say</button>
+        </form>
+        <div class="row">
+          <select id="say-emotion"></select>
+          <select id="say-action"></select>
+        </div>
+        <div id="lines" class="lines"></div>
+      </section>
+
+      <section>
+        <h3>Expressions (local)</h3>
+        <div id="emotions" class="row wrap"></div>
+        <div id="actions" class="row wrap"></div>
+      </section>
+
+      <section>
+        <h3>Log</h3>
+        <div id="log"></div>
+        <small id="latency">latency: –</small>
+      </section>
+
+      <section>
+        <h3>Projection & audio</h3>
+        <label>Colour <select id="s-palette"></select></label>
+        <label>Scale <input type="range" id="s-scale" min="0.4" max="2.2" step="0.01" /></label>
+        <label>Horizontal <input type="range" id="s-offsetX" min="-0.45" max="0.45" step="0.005" /></label>
+        <label>Vertical <input type="range" id="s-offsetY" min="-0.45" max="0.45" step="0.005" /></label>
+        <label>Glow <input type="range" id="s-glow" min="0" max="2" step="0.01" /></label>
+        <label>Volume <input type="range" id="s-volume" min="0" max="1" step="0.01" /></label>
+        <label>Reverb <input type="range" id="s-reverb" min="0" max="1" step="0.01" /></label>
+        <label>Speaker delay ms <input type="range" id="s-extraLatencyMs" min="0" max="400" step="5" /></label>
+        <small id="out-latency"></small>
+        <form id="server-form" class="row"><input id="server" spellcheck="false" /><button>Connect</button></form>
+        <small id="backends"></small>
+      </section>
+
+      <section class="row">
+        <button id="remote-btn">Open remote control window</button>
+      </section>
+
+      <footer>
+        <kbd>F</kbd> fullscreen · <kbd>K</kbd> test pattern · <kbd>1</kbd>–<kbd>9</kbd> lines · arrows move · <kbd>+</kbd>/<kbd>-</kbd> scale · <kbd>O</kbd> hide panel
+      </footer>
+    </aside>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
