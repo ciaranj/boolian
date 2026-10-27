@@ -52,6 +52,8 @@ def transcript(records: list[dict]) -> None:
             print(f"{t}  Boolian ({r.get('emotion')}{move}): {r['text']}{src}{lat}")
         elif r["kind"] == "reset":
             print(f"{t}  -- forgotten ({r.get('reason')})")
+        elif r["kind"] == "alert":
+            print(f"{t}  !! OPERATOR ALERTED: a child may need help")
         elif r["kind"] == "cancelled":
             print(f"{t}  -- cut off ({r.get('reason')})")
 
@@ -75,7 +77,10 @@ def summary(records: list[dict]) -> None:
     moves = Counter(r.get("action") for r in ghost if r.get("action") not in (None, "none"))
     per_hour = Counter(r["ts"][11:13] for r in visitors if not r.get("rejected"))
 
+    alerts = [r for r in records if r["kind"] == "alert"]
     print("\n" + "=" * 60)
+    for a in alerts:
+        print(f"!! {a['ts'][:16].replace('T', ' ')}  A child may have needed help: “{a.get('text')}”")
     span = f"{records[0]['ts'][:16].replace('T', ' ')} to {records[-1]['ts'][11:16]}" if records else "no records"
     print(f"Summary  ({span})")
     print(f"  Visitor groups who talked: {len(groups)}")
@@ -85,7 +90,11 @@ def summary(records: list[dict]) -> None:
     if latency:
         print(f"  Wait for an AI reply: median {pct(latency, 0.5):.1f}s, 95% under {pct(latency, 0.95):.1f}s, "
               f"worst {max(latency):.1f}s")
-    trouble = {k: sources[k] for k in ("llm_timeout", "llm_fallback", "safety_redirect", "asked_repeat") if sources[k]}
+    trouble = {k: sources[k] for k in ("llm_timeout", "llm_fallback", "safety_redirect", "invite_redirect", "secret_redirect",
+                                       "asked_repeat") if sources[k]}
+    guarded = {k: sources[k] for k in ("needs_help", "secret", "stay_outside", "friend") if sources[k]}
+    if guarded:
+        print(f"  Fixed safety answers: {', '.join(f'{k} {v}' for k, v in guarded.items())}")
     if trouble:
         print(f"  Trouble: {', '.join(f'{k} {v}' for k, v in trouble.items())}")
     if resets:

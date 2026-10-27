@@ -89,6 +89,11 @@ export class Panel {
     const micSel = $<HTMLSelectElement>("s-mic");
     micSel.addEventListener("change", () => run({ c: "settings", patch: { micDevice: micSel.value } }));
 
+    $("alert").addEventListener("click", () => {
+      $("alert").hidden = true;
+      document.title = document.title.replace(/^⚠ /, "");
+    });
+
     $("server-form").addEventListener("submit", (e) => {
       e.preventDefault();
       run({ c: "server", url: $<HTMLInputElement>("server").value.trim() });
@@ -176,6 +181,13 @@ export class Panel {
       case "awake":
         $("awake-note").hidden = st.on;
         break;
+      case "alert": {
+        const el = $("alert");
+        el.textContent = `⚠ ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}  ${st.text}  (click to dismiss)`;
+        el.hidden = false;
+        if (!document.title.startsWith("⚠")) document.title = `⚠ ${document.title}`;
+        break;
+      }
     }
   }
 

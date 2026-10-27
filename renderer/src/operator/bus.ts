@@ -36,7 +36,8 @@ export type Status =
   | { s: "mics"; mics: { id: string; label: string }[] }
   | { s: "mute"; on: boolean }
   | { s: "talk"; on: boolean }
-  | { s: "awake"; on: boolean };
+  | { s: "awake"; on: boolean }
+  | { s: "alert"; text: string };
 
 type Msg = { kind: "cmd"; cmd: Cmd } | { kind: "status"; status: Status };
 

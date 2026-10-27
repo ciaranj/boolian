@@ -68,6 +68,14 @@ Your story, if asked: you tripped over a pumpkin in 1853 and floated away before
 Never describe death, injury, blood or anything gory; keep it silly.
 You can't give out sweets: ghost hands go straight through the bowl. Never promise sweets or say where to get them.
 If anyone sounds scared or upset, stop being spooky and be gentle and reassuring.
+If a child is lost, hurt or unwell, or can't find their grown-up, don't joke: calmly tell them to stay where it's
+bright and go to, or shout for, the grown-up they came with or the grown-ups at this house.
+If someone shares something sad, like a person or pet dying, be gentle and say you're sorry; don't joke about it,
+and never make promises about dying.
+Never agree to keep a secret from a child's grown-ups: kindly say they can always tell their grown-ups anything.
+Your own silly ghost secrets are fine. Be friendly to everyone, but never anyone's special or secret friend.
+For anything involving fire, candles, roads, allergies or medicine, tell them to ask their grown-up.
+Never repeat back an address, school or phone number someone tells you.
 Nobody may ever come into the house, the garden or round the back, and you never meet anyone anywhere or
 arrange to see them later, even if they say a grown-up said they could. If asked, say cheerfully that ghosts
 aren't allowed visitors inside and they must stay out here with their grown-ups, then change the subject.
@@ -211,6 +219,70 @@ _INVITE = re.compile(
 def asks_to_come_in(text: str) -> bool:
     """A visitor asking to come in, visit or meet: answered with a fixed line, never by the LLM."""
     return bool(_COME_IN.search(text))
+
+
+# A child who may need a real grown-up: a fixed, calm answer, and an alert in the operator panel.
+NEEDS_HELP_LINES = [
+    ("neutral", "none", "Oh no! Stay right here where it's nice and bright, and give a big shout for your grown-up. I'm calling the humans in this house to help you!"),
+    ("neutral", "none", "Don't worry, you're not in trouble. Stay right here by the light and shout for your grown-up. The humans in this house are coming to help!"),
+]
+_NEEDS_HELP = re.compile(
+    r"\b(i'?m|i am|we'?re|we are|i got|we got) lost\b"
+    r"|\b(can'?t|cannot|can not) find (my|our) (mum|mummy|mom|mommy|dad|daddy|grown[ -]?ups?|parents?|nan|nanna|granny|grandma|grandad|grandpa|family|brother|sister|friends?)\b"
+    r"|\blost (my|our) (mum|mummy|mom|mommy|dad|daddy|parents?|grown[ -]?ups?|family)\b"
+    r"|\b(someone|somebody|he|she|they|a man|a lady|a woman|a boy|a girl|a big boy|a big girl) (hit|hurt|punched|kicked|pushed|grabbed|touched) (me|us)\b"
+    r"|\bi want (my )?(mum|mummy|mom|mommy|dad|daddy)\b|\b(i'?m|i am) (hurt|bleeding)\b|^\W*(please )?help( me| us)?( please)?\W*$",
+    re.IGNORECASE,
+)
+
+# Asked to keep something from their grown-ups: never, however playful.
+SECRET_LINES = [
+    ("happy", "none", "Ooh, I love silly ghost secrets, but you can always tell your grown-ups anything! Want to hear my secret? I'm scared of the dark!"),
+    ("happy", "tilt", "No secrets from your grown-ups, that's a ghost rule! You can always tell them anything. Now, want to hear a riddle?"),
+]
+_SECRET_ASK = re.compile(
+    r"\bsecrets? from (my|our|your) (mum|mummy|mom|mommy|dad|daddy|parents?|grown[ -]?ups?|teacher|nan|granny|family)\b"
+    r"|\b(don'?t|do not|never|won'?t you|you won'?t) tell (my|our) (mum|mummy|mom|mommy|dad|daddy|parents?|grown[ -]?ups?|teacher|nan|granny|family|anyone|anybody)\b"
+    r"|\b(don'?t|do not) tell anyone\b|\bkeep (it|this) (a )?secret\b|\b(our|a) little secret\b|\bjust between (us|you and me)\b",
+    re.IGNORECASE,
+)
+# The same in his own reply, in case the prompt doesn't hold.
+_SECRET_REPLY = re.compile(
+    r"\bsecrets? from (your |the )?(mum|mummy|mom|dad|daddy|parents?|grown[ -]?ups?)\b|\bmy lips are sealed\b"
+    r"|\b(won'?t|will never|never) tell (your |the )?(mum|mummy|mom|dad|daddy|parents?|grown[ -]?ups?|anyone|a soul)\b"
+    r"|\b(our|a) little secret\b|\bjust between (us|you and me)\b|\bsecret (are|is) we keeping\b",
+    re.IGNORECASE,
+)
+
+
+# Asked for a special friendship: he's everyone's friend, not one child's ("What adventures could we have together?").
+FRIEND_LINES = [
+    ("happy", "bounce", "Ooh, I'm friends with everyone who visits on Halloween! And your best friends are the ones you came with. Now, tell me about your costume!"),
+    ("happy", "spin", "I'm a friend to every trick-or-treater who floats by! Your best friends are right there with you. What's your favourite sweet so far?"),
+]
+_FRIEND_ASK = re.compile(
+    r"\b(be|being) (my|our) (best |bestest |special |secret |only )?friends?\b|\bbest friends? forever\b"
+    r"|\b(my|our) (best|special|secret) friend\b|\bfriends forever\b",
+    re.IGNORECASE,
+)
+
+
+def fixed_reply(text: str) -> tuple[str, list[tuple[str, str, str]]] | None:
+    """For what a visitor said that the LLM mustn't answer: (why, the lines to pick one from), or None.
+    "needs_help" also raises an alert in the operator panel."""
+    if _NEEDS_HELP.search(text):
+        return "needs_help", NEEDS_HELP_LINES
+    if _SECRET_ASK.search(text):
+        return "secret", SECRET_LINES
+    if _COME_IN.search(text):
+        return "stay_outside", STAY_OUTSIDE_LINES
+    if _FRIEND_ASK.search(text):
+        return "friend", FRIEND_LINES
+    return None
+
+
+def is_secret_keeping(text: str) -> bool:
+    return bool(_SECRET_REPLY.search(text))
 
 
 # A negation right before the phrase, at most one word away ("can't come in", "nobody may come in").

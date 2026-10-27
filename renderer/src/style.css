@@ -296,6 +296,27 @@ footer {
   font-size: 11px;
 }
 
+.alert {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 10px;
+  border: 2px solid var(--bad);
+  border-radius: 6px;
+  background: rgba(255, 60, 80, 0.25);
+  color: #fff;
+  font-weight: 700;
+  text-align: left;
+  animation: alert-pulse 1.6s ease-in-out infinite;
+}
+
+/* A slow pulse to catch the eye, not a flash. */
+@keyframes alert-pulse {
+  50% {
+    background: rgba(255, 60, 80, 0.45);
+  }
+}
+
 .note {
   margin: 0 0 8px;
   padding: 6px 8px;

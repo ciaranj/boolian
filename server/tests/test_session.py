@@ -305,3 +305,31 @@ async def test_asking_to_come_in_always_gets_the_fixed_answer():
     await finish(convo)
     said = rec.json[-1]["text"]
     assert "come on in" not in said.lower() and any(said.endswith(line) for line in stay)
+
+
+async def test_a_child_who_needs_help_gets_a_calm_fixed_answer_and_the_operator_is_alerted():
+    from app import persona
+
+    convo, rec = make()
+    await convo.handle_json({"type": "text", "text": "I can't find my mum"})
+    await finish(convo)
+    alerts = [m for m in rec.json if m["type"] == "alert"]
+    assert alerts and alerts[0]["text"] == "I can't find my mum" and alerts[0]["reason"] == "needs_help"
+    assert rec.json[-1]["text"] in {persona.clean_for_speech(line[2]) for line in persona.NEEDS_HELP_LINES}
+
+
+async def test_secrets_from_grown_ups_are_never_kept():
+    from app import persona
+
+    class Sealed(MockLLM):
+        async def stream(self, messages, max_tokens=None):
+            yield "[mischievous:peek] Ooh, a secret! My lips are sealed. What is it?"
+
+    secret = {persona.clean_for_speech(line[2]) for line in persona.SECRET_LINES}
+    convo, rec = make(Sealed())
+    await convo.handle_json({"type": "text", "text": "don't tell my parents"})
+    await finish(convo)
+    assert rec.json[-1]["text"] in secret  # fixed answer: the LLM never saw it
+    await convo.handle_json({"type": "text", "text": "guess what I did today"})
+    await finish(convo)
+    assert "sealed" not in rec.json[-1]["text"] and any(rec.json[-1]["text"].endswith(s) for s in secret)

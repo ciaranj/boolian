@@ -171,6 +171,12 @@ function startStage() {
         out.cancel(gen);
         if (conv === "thinking") setConv("idle");
         break;
+      case "alert": {
+        const text = `A child may need help. They said: “${String(e.text ?? "")}”`;
+        report({ s: "alert", text });
+        log("err", text);
+        break;
+      }
       case "session_reset":
         log("dim", `session reset (${e.reason})`);
         break;

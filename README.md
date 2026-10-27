@@ -17,7 +17,7 @@ Laptop browser (remote window → its screen)                         Chatterbox
 
 **What he does:** answers in one to three short sentences, with an emotion and a move (bounce, tilt, spin, hide, peek)
 chosen per reply. He makes a reaction noise the moment a visitor stops talking, so the wait for the real answer is
-covered. He remembers the last 30 exchanges and knows the date and rough time of night. He asks open questions, and
+covered. He remembers the last 25 exchanges and knows the date and rough time of night. He asks open questions, and
 blows the odd raspberry or farts (real recordings, with animations to match). If nobody answers, he asks twice
 whether anyone's there, then forgets them; he also forgets them when they say goodbye.
 
@@ -150,6 +150,12 @@ All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
   speaks any typed text in his voice; `[fart]` or `[raspberry]` in it works too. Both still work if the server is
   down, using the browser's own voice.
 - **X** / **Esc** stops him talking. **M** mutes.
+- **If a red alert appears in the operator panel**, a child said something like "I'm lost", "I can't find my mum" or
+  "someone hit me". He has calmly told them to stay in the light and shout for their grown-up, and that the humans in
+  the house are coming, so go and help. Click the alert to dismiss it.
+- Some things never reach the AI, because it has answered them badly in testing. Being lost or hurt, keeping secrets
+  from grown-ups, asking to come in, visit or meet, and asking to be his best friend all get fixed, safe answers.
+  Explicit invitations or secret-keeping that still slip into a reply are swapped out before they're spoken.
 - If he starts answering himself: turn auto-listen off and use Space.
 - If the server dies: he falls asleep (Zzz), puppet lines still work, and he wakes when the server returns.
 

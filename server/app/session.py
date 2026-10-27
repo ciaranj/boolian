@@ -284,12 +284,18 @@ class Conversation:
 
     async def _llm_turn(self, gen: int, timing: TurnTiming, user_text: str) -> None:
         self.nudges = 0
-        if persona.asks_to_come_in(user_text):
+        if fixed := persona.fixed_reply(user_text):
+            # Things the LLM has got wrong (inviting children in, keeping secrets from parents, joking with a
+            # lost child): a fixed answer instead, and for a child who may need help, an alert for the operator.
+            why, lines = fixed
             self.last_attract = None
             self.history.append({"role": "user", "content": user_text})
-            emotion, action, line = persona.pick(persona.STAY_OUTSIDE_LINES)
-            log.info("visitor asked to come in; fixed answer")
-            await self._say_turn(gen, timing, emotion, action, line, source="stay_outside")
+            if why == "needs_help":
+                log.warning("a visitor may need help: %r", user_text)
+                self._log("alert", reason=why, text=user_text)
+                await self._send(gen, {"type": "alert", "reason": why, "text": user_text})
+            emotion, action, line = persona.pick(lines)
+            await self._say_turn(gen, timing, emotion, action, line, source=why)
             return
         # Answering what he just called out ("I've got riddles!") needs him to remember he said it.
         if not self.history and self.last_attract and time.monotonic() - self.last_attract[0] < 90:
@@ -348,10 +354,12 @@ class Conversation:
                         reply["tag"] = persona.remembered_tag(ev)
                     await self._send_expression(gen, ev)
                     continue
-                if persona.is_invitation(ev.text):
-                    log.warning("invitation in LLM output replaced")
-                    timing.outcome = "invite_redirect"
-                    emotion, action, line = persona.pick(persona.STAY_OUTSIDE_LINES)
+                swap = (("invite_redirect", persona.STAY_OUTSIDE_LINES) if persona.is_invitation(ev.text) else
+                        ("secret_redirect", persona.SECRET_LINES) if persona.is_secret_keeping(ev.text) else None)
+                if swap:
+                    log.warning("LLM output replaced (%s)", swap[0])
+                    timing.outcome = swap[0]
+                    emotion, action, line = persona.pick(swap[1])
                     await self._send_expression(gen, Expression(emotion, action))
                     await queue.put(Sentence(line))
                     sentences += 1
