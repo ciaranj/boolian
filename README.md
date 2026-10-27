@@ -82,7 +82,10 @@ VRAM estimate: a 3B/4B Q4 model with 4k context uses about 3–4 GB, Whisper lar
 which leaves plenty of headroom. Check with `nvidia-smi` while a turn is running.
 
 Pick Boolian's voice with `SPECTRE_TTS_VOICE` (Kokoro voices such as `bm_fable`, `bm_george`, `bm_lewis`, `am_puck`).
-The browser adds reverb and a slight chorus on top, which you can adjust with the Reverb slider.
+The browser adds reverb and a slight chorus on top, which you can adjust with the Reverb slider. Under it, four
+more ghostly effects are off by default: *Waver* (a slow, drifting pitch wobble), *Flanger* (a whooshing sweep),
+*Echo* (darkening repeats) and *Shadow voice* (a quiet second voice an octave below). Try them on the real speaker;
+each one costs a little clarity.
 
 All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
 `SPECTRE_AUTH_TOKEN` enables a shared token: append `?token=…` to the page URL.

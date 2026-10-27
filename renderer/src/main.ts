@@ -411,6 +411,7 @@ function startStage() {
     ghost.palette = paletteOf(q.get("palette") ?? settings.palette);
     out.setVolume(settings.volume);
     out.setReverb(settings.reverb);
+    out.setFx({ waver: settings.fxWaver, flange: settings.fxFlange, echo: settings.fxEcho, shadow: settings.fxShadow });
     out.extraLatencyMs = settings.extraLatencyMs;
     energyVad.opts.endSilenceMs = settings.vadPauseMs;
     silero?.setOptions({ threshold: settings.vadThreshold, pauseMs: settings.vadPauseMs });

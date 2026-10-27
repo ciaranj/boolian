@@ -3,6 +3,7 @@
  * when audio is *actually* audible (including Bluetooth / output latency).
  */
 
+import { mulberry32 } from "../ghost/anim";
 import type { RudeNoise } from "../protocol";
 
 export interface OutputEvents {
@@ -13,6 +14,49 @@ export interface OutputEvents {
 }
 
 const START_LEAD_S = 0.12; // jitter cushion before the first chunk of a reply
+
+/** Ghostly voice effects, each 0 (off) .. 1. */
+export interface VoiceFx {
+  waver: number; // slow, uneven pitch wobble, like a voice drifting on the air
+  flange: number; // a sweeping, whooshing comb filter
+  echo: number; // repeats that darken as they fade, like calling down a well
+  shadow: number; // a quiet second voice an octave below his
+}
+
+// Pitch shifter for the shadow voice: two read heads drift through a short delay line at the pitch ratio,
+// each faded in and out with a sine window, half a window apart, so their seams cancel out.
+const SHADOW_WORKLET = `
+class Shadow extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buf = new Float32Array(sampleRate);
+    this.w = Math.round(sampleRate * 0.07);
+    this.ratio = 0.5;
+    this.pos = 0;
+    this.phase = 0;
+  }
+  read(d) {
+    let p = this.pos - d;
+    while (p < 0) p += this.buf.length;
+    const i = Math.floor(p), f = p - i;
+    return this.buf[i % this.buf.length] * (1 - f) + this.buf[(i + 1) % this.buf.length] * f;
+  }
+  process(inputs, outputs) {
+    const inp = inputs[0][0], out = outputs[0][0];
+    if (!out) return true;
+    const step = (1 - this.ratio) / this.w;
+    for (let n = 0; n < out.length; n++) {
+      this.buf[this.pos] = inp ? inp[n] : 0;
+      const a = this.phase, b = (this.phase + 0.5) % 1;
+      out[n] = this.read(a * this.w) * Math.sin(Math.PI * a) + this.read(b * this.w) * Math.sin(Math.PI * b);
+      this.phase = (this.phase + step) % 1;
+      this.pos = (this.pos + 1) % this.buf.length;
+    }
+    return true;
+  }
+}
+registerProcessor("ghost-shadow", Shadow);
+`;
 const UNDERRUN_LEAD_S = 0.03;
 
 export class AudioOut {
@@ -23,6 +67,9 @@ export class AudioOut {
   private master!: GainNode;
   private voiceIn!: GainNode;
   private wet!: GainNode;
+  private fxNodes: { waver: GainNode[]; flange: GainNode; echo: GainNode; shadow: GainNode | null } | null = null;
+  private dry: GainNode | null = null;
+  private fx: VoiceFx = { waver: 0, flange: 0, echo: 0, shadow: 0 };
   private analyser!: AnalyserNode;
   private sampleBuf = new Float32Array(1024);
   private levels: { t: number; v: number }[] = [];
@@ -46,7 +93,16 @@ export class AudioOut {
   async unlock(): Promise<AudioContext> {
     if (!this.ctx) {
       this.ctx = new AudioContext({ latencyHint: "interactive" });
-      this.buildGraph(this.ctx);
+      let shadow = true;
+      try {
+        const url = URL.createObjectURL(new Blob([SHADOW_WORKLET], { type: "application/javascript" }));
+        await this.ctx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.warn("no shadow voice:", err);
+        shadow = false;
+      }
+      this.buildGraph(this.ctx, shadow);
     }
     await this.ctx.resume();
     return this.ctx;
@@ -59,7 +115,7 @@ export class AudioOut {
     return (ctx.outputLatency || ctx.baseLatency || 0) + this.extraLatencyMs / 1000;
   }
 
-  private buildGraph(ctx: AudioContext) {
+  private buildGraph(ctx: AudioContext, withShadow: boolean) {
     this.master = ctx.createGain();
     this.master.gain.value = this.volume;
     this.master.connect(ctx.destination);
@@ -67,18 +123,35 @@ export class AudioOut {
     this.voiceIn = ctx.createGain();
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 1024;
-    this.voiceIn.connect(this.analyser); // dry tap drives the mouth, so reverb tails don't
+    this.voiceIn.connect(this.analyser); // dry tap drives the mouth, so reverb tails and echoes don't
+
+    // Waver: the whole voice runs through a delay whose length is wobbled, which bends the pitch: a slow drift
+    // sharp and flat plus a faster quaver, like a voice on the wind. At 0 it's a fixed 30 ms delay (inaudible).
+    const waver = ctx.createDelay(0.1);
+    waver.delayTime.value = 0.03;
+    const waverDepths = [0.31, 4.7].map((hz, i) => {
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = hz;
+      const depth = ctx.createGain();
+      depth.gain.value = 0;
+      lfo.connect(depth).connect(waver.delayTime);
+      lfo.start(ctx.currentTime + i * 0.7);
+      return depth;
+    });
+    const voice = ctx.createGain(); // the voice after the waver: everything below starts here
+    this.voiceIn.connect(waver).connect(voice);
 
     const dry = ctx.createGain();
     dry.gain.value = 0.85;
-    this.voiceIn.connect(dry).connect(this.master);
+    voice.connect(dry).connect(this.master);
+    this.dry = dry;
 
     // Haunted-hallway reverb from a synthetic impulse response.
     const conv = ctx.createConvolver();
     conv.buffer = impulse(ctx, 2.6, 2.8);
     this.wet = ctx.createGain();
     this.wet.gain.value = 0.35;
-    this.voiceIn.connect(conv).connect(this.wet).connect(this.master);
+    voice.connect(conv).connect(this.wet).connect(this.master);
 
     // Slow chorus wobble: a short modulated delay mixed in quietly.
     const delay = ctx.createDelay(0.05);
@@ -91,7 +164,72 @@ export class AudioOut {
     lfo.start();
     const chorus = ctx.createGain();
     chorus.gain.value = 0.3;
-    this.voiceIn.connect(delay).connect(chorus).connect(this.master);
+    voice.connect(delay).connect(chorus).connect(this.master);
+
+    // Flanger: a very short delay swept up and down (about one sweep per sentence), fed back into itself.
+    // It takes over from the dry voice as it's turned up, so the comb-filter whoosh isn't masked.
+    const flangeDelay = ctx.createDelay(0.02);
+    flangeDelay.delayTime.value = 0.0055;
+    const sweep = ctx.createOscillator();
+    sweep.frequency.value = 0.45;
+    const sweepDepth = ctx.createGain();
+    sweepDepth.gain.value = 0.0045;
+    sweep.connect(sweepDepth).connect(flangeDelay.delayTime);
+    sweep.start();
+    const flangeFb = ctx.createGain();
+    flangeFb.gain.value = 0.7;
+    flangeDelay.connect(flangeFb).connect(flangeDelay);
+    const flange = ctx.createGain();
+    flange.gain.value = 0;
+    voice.connect(flangeDelay).connect(flange).connect(this.master);
+
+    // Echo: a third of a second between repeats, each one duller (low-passed) and quieter.
+    const echoDelay = ctx.createDelay(1);
+    echoDelay.delayTime.value = 0.33;
+    const echoTone = ctx.createBiquadFilter();
+    echoTone.type = "lowpass";
+    echoTone.frequency.value = 2200;
+    const echoFb = ctx.createGain();
+    echoFb.gain.value = 0.45;
+    echoDelay.connect(echoTone).connect(echoFb).connect(echoDelay);
+    const echo = ctx.createGain();
+    echo.gain.value = 0;
+    voice.connect(echoDelay);
+    echoTone.connect(echo);
+    echo.connect(this.master);
+    echo.connect(conv); // echoes ring into the hallway too
+
+    // Shadow: an octave down, low-passed (it's a presence, not a second speaker), a beat behind, into the reverb.
+    let shadow: GainNode | null = null;
+    if (withShadow) {
+      const shifter = new AudioWorkletNode(ctx, "ghost-shadow");
+      const shadowTone = ctx.createBiquadFilter();
+      shadowTone.type = "lowpass";
+      shadowTone.frequency.value = 1400;
+      const lag = ctx.createDelay(0.2);
+      lag.delayTime.value = 0.04;
+      shadow = ctx.createGain();
+      shadow.gain.value = 0;
+      voice.connect(shifter).connect(shadowTone).connect(lag).connect(shadow);
+      shadow.connect(this.master);
+      shadow.connect(conv);
+    }
+    this.fxNodes = { waver: waverDepths, flange, echo, shadow };
+    this.setFx(this.fx);
+  }
+
+  setFx(fx: VoiceFx) {
+    this.fx = { ...fx };
+    const n = this.fxNodes;
+    if (!n || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    // Waver at full: about ±4% pitch from the slow drift (two-thirds of a semitone) and ±2.5% quaver.
+    n.waver[0].gain.setTargetAtTime(0.02 * fx.waver, t, 0.05);
+    n.waver[1].gain.setTargetAtTime(0.00085 * fx.waver, t, 0.05);
+    n.flange.gain.setTargetAtTime(0.75 * fx.flange, t, 0.05);
+    this.dry?.gain.setTargetAtTime(0.85 * (1 - 0.6 * fx.flange), t, 0.05);
+    n.echo.gain.setTargetAtTime(0.5 * fx.echo, t, 0.05);
+    n.shadow?.gain.setTargetAtTime(0.7 * fx.shadow, t, 0.05);
   }
 
   setVolume(v: number) {
@@ -295,12 +433,14 @@ function noise(ctx: BaseAudioContext, seconds: number): AudioBuffer {
   return buf;
 }
 
+/** Seeded, so the hallway sounds the same on every load (random noise made each reload a slightly different room). */
 function impulse(ctx: BaseAudioContext, seconds: number, decay: number): AudioBuffer {
   const len = Math.floor(ctx.sampleRate * seconds);
   const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  const rand = mulberry32(1031);
   for (let c = 0; c < 2; c++) {
     const d = buf.getChannelData(c);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** decay;
+    for (let i = 0; i < len; i++) d[i] = (rand() * 2 - 1) * (1 - i / len) ** decay;
   }
   return buf;
 }

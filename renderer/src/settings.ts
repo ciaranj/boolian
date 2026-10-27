@@ -5,6 +5,10 @@ export interface Settings {
   glow: number;
   volume: number;
   reverb: number;
+  fxWaver: number; // ghostly voice effects, 0 = off (see VoiceFx in audio/output.ts)
+  fxFlange: number;
+  fxEcho: number;
+  fxShadow: number;
   extraLatencyMs: number;
   serverUrl: string;
   autoListen: boolean;
@@ -30,6 +34,10 @@ export function loadSettings(): Settings {
     glow: 1,
     volume: 0.9,
     reverb: 0.35,
+    fxWaver: 0,
+    fxFlange: 0,
+    fxEcho: 0,
+    fxShadow: 0,
     extraLatencyMs: 0,
     serverUrl: defaultServer(),
     autoListen: false,
