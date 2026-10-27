@@ -47,6 +47,9 @@ def test_clean_for_speech():
 def test_safety():
     assert is_unsafe("let's go get some beer")
     assert not is_unsafe("I love pumpkin pie and spooky stories")
+    for costume in ["Is that a cardboard knife, pirate?", "A Ghostbusters proton gun!", "I love Charles Dickens",
+                    "a murder of crows", "Shiitake mushrooms are spooky", "Sussex is lovely"]:
+        assert not is_unsafe(costume), costume
 
 
 def test_first_chunk_can_end_at_a_comma():
