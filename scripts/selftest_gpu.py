@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 import wave
 
 import numpy as np
@@ -111,6 +112,7 @@ async def compare() -> int:
             print(f"  loaded in {time.monotonic() - t:.1f}s, VRAM now {vram()}")
         except Exception as e:  # e.g. chatterbox not installed
             print(f"  couldn't load: {e!r}")
+            traceback.print_exc()
             continue
         for i, line in enumerate(COMPARE_LINES, 1):
             text = line if tts.sound_tags else strip_sounds(line)

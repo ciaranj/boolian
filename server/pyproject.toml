@@ -12,7 +12,9 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["faster-whisper>=1.1"]
 kokoro = ["kokoro>=0.9.4"]
-chatterbox = ["chatterbox-tts==0.1.7"]  # pins torch 2.6 and transformers 5.2
+# chatterbox-tts pins torch 2.6 and transformers 5.2. Its watermarker (resemble-perth) imports pkg_resources,
+# which setuptools 82 removed; without it the watermarker silently becomes None and loading fails.
+chatterbox = ["chatterbox-tts==0.1.7", "setuptools<82"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "websockets>=12"]
 
 [tool.pytest.ini_options]
