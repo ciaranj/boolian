@@ -44,10 +44,12 @@ FLOW_STEP = 64  # flow graphs are recorded for lengths (mel frames) in steps of 
 FLOW_MAX_SPEECH_S = 15  # sentences up to this long (plus the reference clip) get a recorded graph
 
 # Streaming (SPECTRE_TTS_STREAM=1), CosyVoice's recipe for this decoder: each piece re-decodes all speech
-# tokens so far in "not finished" mode (the flow then leaves out the last 3 tokens, which lack lookahead),
-# with one fixed noise draw per sentence so every frame sees the same noise each time it's decoded. Only
-# frames not yet played go to the vocoder, which re-runs a few frames of overlap with its excitation
-# carried across and crossfades them with a Hamming window.
+# tokens so far, with one fixed noise draw per sentence so every frame sees the same noise each time it's
+# decoded, and holds back the newest frames: the last 3 tokens' (they have no lookahead yet) and a few
+# more. Only frames not yet played go to the vocoder, which re-runs a few frames of overlap with its
+# excitation carried across and crossfades them with a Hamming window. (S3Gen's own "not finished" mode
+# can't be used: in chatterbox-tts 0.1.7 its mask keeps the untrimmed length, so the shapes don't match.
+# Decoding everything and holding the lookahead frames back ourselves is equivalent.)
 STREAM_FIRST = 25  # speech tokens before the first piece (25 = 1 s of speech)
 STREAM_HOP = 25  # speech tokens between later pieces
 STREAM_HOLD = 6  # newest mel frames held back from each piece: they change most once more context arrives
@@ -371,22 +373,22 @@ class StreamDecoder:
         self.carry = None  # the vocoder's overlap from the previous piece
         self.started = False
 
-    def mel(self, toks, finalize: bool):
-        """S3Gen's own flow inference, with our noise for every frame (prompt included)."""
+    def mel(self, toks):
+        """S3Gen's own flow inference over all these tokens, with our noise for every frame (prompt included)."""
         from chatterbox.models.s3gen.s3gen import S3Token2Mel
 
-        s3 = self.model.s3gen
-        n = len(toks) if finalize else len(toks) - s3.flow.pre_lookahead_len
-        frames = self.ratio * (self.prompt_tokens + n)  # the flow's length: reference clip + these tokens
-        return S3Token2Mel.forward(s3, speech_tokens=toks, ref_wav=None, ref_sr=None, ref_dict=self.model.conds.gen,
-                                   n_cfm_timesteps=2, finalize=finalize, noised_mels=self.noise[..., :frames])
+        frames = self.ratio * (self.prompt_tokens + len(toks))  # the flow's length: reference clip + tokens
+        return S3Token2Mel.forward(self.model.s3gen, speech_tokens=toks, ref_wav=None, ref_sr=None,
+                                   ref_dict=self.model.conds.gen, n_cfm_timesteps=2, finalize=True,
+                                   noised_mels=self.noise[..., :frames])
 
     def push(self, toks, finalize: bool) -> None:
         toks = toks[toks < OOV_FROM]
-        if not finalize and len(toks) <= self.model.s3gen.flow.pre_lookahead_len:
+        lookahead = self.ratio * self.model.s3gen.flow.pre_lookahead_len  # frames that still lack lookahead
+        if not finalize and len(toks) * self.ratio <= lookahead + STREAM_HOLD:
             return
-        mel = self.mel(toks, finalize)
-        upto = mel.shape[2] if finalize else mel.shape[2] - STREAM_HOLD
+        mel = self.mel(toks)
+        upto = mel.shape[2] if finalize else mel.shape[2] - lookahead - STREAM_HOLD
         new = mel[:, :, self.emitted:max(upto, self.emitted)]
         self.emitted = max(upto, self.emitted)
         if new.shape[2] or (finalize and self.carry is not None):
