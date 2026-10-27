@@ -52,6 +52,11 @@ export class MicInput {
     return this.node !== null;
   }
 
+  /** Which input the browser actually picked, e.g. "MacBook Pro Microphone (Built-in)". */
+  get deviceLabel() {
+    return this.stream?.getAudioTracks()[0]?.label || "unknown device";
+  }
+
   async start(ctx: AudioContext, deviceId?: string) {
     this.stop();
     this.stream = await navigator.mediaDevices.getUserMedia({

@@ -378,7 +378,8 @@ function startStage() {
     out.chime();
     try {
       await mic.start(ctx);
-      micInfo = `mic on (${ctx.sampleRate} Hz → 16 kHz)`;
+      micInfo = `mic: ${mic.deviceLabel} (${ctx.sampleRate} Hz → 16 kHz)`;
+      log("dim", micInfo);
     } catch (err) {
       micInfo = `mic unavailable: ${(err as Error).message}`;
       log("err", "microphone unavailable: use typed input or puppet lines");
