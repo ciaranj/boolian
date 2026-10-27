@@ -43,6 +43,9 @@ class OpenAICompatLLM:
             "stream": True,
             "max_tokens": max_tokens or self.cfg.llm_max_tokens,
             "temperature": self.cfg.llm_temperature,
+            # Reasoning models (Gemma 4, Qwen3) would otherwise think for seconds before speaking.
+            # llama-server applies this per request; servers that don't know it ignore it.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         async with self.client.stream("POST", f"{self.cfg.llm_url}/chat/completions", json=body) as r:
             r.raise_for_status()
