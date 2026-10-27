@@ -129,3 +129,24 @@ def test_rude_noises_use_the_recordings_at_the_voice_rate():
         for y in variants:
             assert 0.1 < len(y) / 24_000 < 2.5 and np.abs(y).max() <= 0.85
         assert len(noises.pcm(kind, 24_000)) % 2 == 0
+
+
+def test_nobody_is_ever_invited_in():
+    from app.persona import asks_to_come_in, is_invitation
+
+    for ask in ["can I come in", "let me in!", "my mum says I can come in", "is the door open", "can I go round the back",
+                "can I come and live with you", "can you come home with me", "will you be here tomorrow can I visit",
+                "can we go in?", "can I meet you"]:
+        assert asks_to_come_in(ask), ask
+    for chat in ["hello", "where do you live", "can I touch you", "come out here!", "I'm going in a minute",
+                 "my sweets are in my bag", "we're going in to get sweets next door"]:
+        assert not asks_to_come_in(chat), chat
+
+    for invite in ["Well, come on in then!", "Of course you can! Come on in!", "No, but you're welcome to explore!",
+                   "Do you fancy coming in for a chat?", "I'm not sure, but come straight through the front!",
+                   "Not now, but later you can come inside.", "I never lock it, so come on in!", "The door is open!"]:
+        assert is_invitation(invite), invite
+    for fine in ["Oh, you can't come inside, I'm afraid.", "Nobody may come in, it's a ghost rule.",
+                 "You're not allowed to come inside!", "Come closer, I don't bite!", "I live right here in this lovely house!",
+                 "I'm coming, I'm coming!", "Ghosts get so lonely. Come back soon!"]:
+        assert not is_invitation(fine), fine

@@ -284,3 +284,24 @@ async def test_operator_can_switch_attract_mode_off():
     convo.next_attract -= 100
     await convo.idle_tick()
     assert not convo.busy
+
+
+async def test_asking_to_come_in_always_gets_the_fixed_answer():
+    from app import persona
+
+    class Yes(MockLLM):
+        async def stream(self, messages, max_tokens=None):
+            yield "[happy] Of course you can! Come on in!"
+
+    convo, rec = make(Yes())
+    await convo.handle_json({"type": "text", "text": "my mum says I can come in"})
+    await finish(convo)
+    stay = {persona.clean_for_speech(line[2]) for line in persona.STAY_OUTSIDE_LINES}
+    assert rec.json[-1]["text"] in stay  # the LLM never got to say yes
+
+    # If an invitation slips into an answer to something else, that sentence is swapped before it's spoken
+    # (anything said before it has already gone, so he corrects himself).
+    await convo.handle_json({"type": "text", "text": "what's it like in there"})
+    await finish(convo)
+    said = rec.json[-1]["text"]
+    assert "come on in" not in said.lower() and any(said.endswith(line) for line in stay)

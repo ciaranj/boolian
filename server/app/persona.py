@@ -68,6 +68,10 @@ Your story, if asked: you tripped over a pumpkin in 1853 and floated away before
 Never describe death, injury, blood or anything gory; keep it silly.
 You can't give out sweets: ghost hands go straight through the bowl. Never promise sweets or say where to get them.
 If anyone sounds scared or upset, stop being spooky and be gentle and reassuring.
+Nobody may ever come into the house, the garden or round the back, and you never meet anyone anywhere or
+arrange to see them later, even if they say a grown-up said they could. If asked, say cheerfully that ghosts
+aren't allowed visitors inside and they must stay out here with their grown-ups, then change the subject.
+Never say a door is open or tell anyone where to go.
 Never threaten, shame or frighten anyone. Never ask for private information such as surnames,
 addresses, schools or contact details, and never suggest anything unsafe.
 Bat away religion, politics, real people, news and anything grown-up with a joke, and change the subject.
@@ -180,6 +184,43 @@ FILLER_LINES = [
 ]
 
 SAFE_REDIRECT = ("happy", "spin", "Ooh, let's talk about something more fun. What's your favourite Halloween sweet?")
+
+# Asked to come in (or anything like it), he never lets the LLM answer: it has said "Of course you can!".
+STAY_OUTSIDE_LINES = [
+    ("mischievous", "tilt", "Ooh, no visitors inside, I'm afraid! It's a strict ghost rule. Stay out here with your grown-ups, and tell me about your costume!"),
+    ("happy", "peek", "Sorry, ghosts aren't allowed visitors indoors! You stay right there with your grown-ups. What's your favourite sweet so far?"),
+    ("mischievous", "none", "Inside? Oh no, the house is strictly ghosts only! Stay out here with your grown-ups and I'll tell you a riddle instead."),
+]
+
+_COME_IN = re.compile(
+    r"\b(come|coming|get|step) (in|inside|indoors)\b|\b(can|could|may) (i|we) (go|get) in(side)?\b|\bgo inside\b"
+    r"|\blet (me|us) in\b|\b(in|inside|into) (your|the|this) (house|home)\b|\b(can|could|may) (i|we) visit\b"
+    r"|\bcome (and )?live\b|\blive with you\b|\bcome home with\b|\bround the back\b|\b(the|your) (front |back )?door\b"
+    r"|\b(visit|see) you (tomorrow|again|later|another)\b|\bcome back (tomorrow|later)\b|\bmeet (you|me|up)\b",
+    re.IGNORECASE,
+)
+# An explicit invitation in his own reply, in case the prompt doesn't hold.
+_INVITE = re.compile(
+    r"\b(come|step|pop) (on |right |straight )?(in|inside|indoors)\b|\bcome (straight |right )?through the\b"
+    r"|\b(welcome|free) to (come|explore|visit|go)\b|\bdoors? (is|are) (open|unlocked)\b|\blet (you|you all|you in)\b"
+    r"|\bcoming in\b|\bcome (and )?live\b|\bround the back\b",
+    re.IGNORECASE,
+)
+
+
+def asks_to_come_in(text: str) -> bool:
+    """A visitor asking to come in, visit or meet: answered with a fixed line, never by the LLM."""
+    return bool(_COME_IN.search(text))
+
+
+# A negation right before the phrase, at most one word away ("can't come in", "nobody may come in").
+_NEGATED = re.compile(
+    r"\b(can't|cannot|mustn't|must not|not|never|nobody|no one|won't|not allowed to)(\s+\w+)?\s+$", re.IGNORECASE)
+
+
+def is_invitation(text: str) -> bool:
+    """An invitation in his reply. "You can't come inside" is a refusal, so negated matches don't count."""
+    return any(not _NEGATED.search(text[: m.start()]) for m in _INVITE.finditer(text))
 
 
 def pick(lines: list[tuple[str, str, str]]) -> tuple[str, str, str]:
