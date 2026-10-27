@@ -40,6 +40,7 @@ class Conversation:
         self.task: asyncio.Task | None = None
         self.timings: dict[int, TurnTiming] = {}
         self._last_filler = -1
+        self.nudges = 0  # prompts said since the visitor last spoke
 
         self.listening = False
         self.audio = bytearray()
@@ -141,18 +142,36 @@ class Conversation:
 
     async def reset(self, reason: str) -> None:
         await self.cancel("reset")
-        self.history.clear()
         self.listening = False
         self.audio.clear()
+        await self._forget(reason)
+
+    async def _forget(self, reason: str) -> None:
+        self.history.clear()
+        self.nudges = 0
         await self._send_json({"v": 1, "type": "session_reset", "reason": reason})
         log.info("session reset (%s)", reason)
 
     async def idle_watchdog(self) -> None:
-        """Forget the visitor after a quiet spell, so the next group gets a fresh ghost."""
         while True:
-            await asyncio.sleep(5)
-            if self.history and not self.busy and not self.listening and time.monotonic() - self.last_activity > self.cfg.idle_reset_s:
-                await self.reset("idle")
+            await asyncio.sleep(1)
+            await self.idle_tick()
+
+    async def idle_tick(self) -> None:
+        """If he spoke and nobody answered, prompt them (a couple of times); after a longer quiet spell,
+        forget the visitor so the next group gets a fresh ghost."""
+        if not self.history or self.busy or self.listening:
+            return
+        quiet = time.monotonic() - self.last_activity
+        if self.cfg.nudge_s and self.nudges < self.cfg.max_nudges and quiet > self.cfg.nudge_s:
+            self.nudges += 1
+            lines = persona.LONELY_LINES if self.nudges == self.cfg.max_nudges else persona.NUDGE_LINES
+            emotion, action, text = persona.pick(lines)
+            log.info("nobody answered; nudge %d", self.nudges)
+            # Not remembered: the LLM should carry on from the conversation, not from the prompting.
+            self._start("nudge", lambda gen, t: self._say_turn(gen, t, emotion, action, text, remember=False))
+        elif quiet > self.cfg.idle_reset_s:
+            await self.reset("idle")
 
     async def close(self) -> None:
         if self.task and not self.task.done():
@@ -226,6 +245,7 @@ class Conversation:
         await self._send(gen, {"type": "reply", "text": " ".join(spoken)})
 
     async def _llm_turn(self, gen: int, timing: TurnTiming, user_text: str) -> None:
+        self.nudges = 0
         self.history.append({"role": "user", "content": user_text})
         messages = self._build_messages()
         queue: asyncio.Queue[Sentence | None] = asyncio.Queue()
@@ -241,6 +261,9 @@ class Conversation:
         elif self.history and self.history[-1]["role"] == "user":
             self.history.pop()
         await self._send(gen, {"type": "reply", "text": " ".join(spoken)})
+        if persona.is_goodbye(user_text) and gen == self.generation:
+            # He's already said goodbye back; forget them without cutting that off.
+            await self._forget("goodbye")
 
     def _build_messages(self) -> list[dict]:
         # Some chat templates (Gemma) insist on strict user/assistant alternation starting with user.

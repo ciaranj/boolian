@@ -80,3 +80,12 @@ def test_sound_instructions_only_when_the_voice_supports_them():
 
     assert "[chuckle]" not in system_prompt("Boolian")
     assert "[chuckle]" in system_prompt("Boolian", sounds=True)
+
+
+def test_goodbyes():
+    from app.persona import is_goodbye
+
+    for text in ["Bye!", "goodbye ghost", "Bye-bye", "we have to go now", "See ya", "Goodnight Boolian", "we're leaving"]:
+        assert is_goodbye(text), text
+    for text in ["I'm a bee", "maybe", "I'm going as a witch", "what's your favourite sweet?", "Happy Halloween"]:
+        assert not is_goodbye(text), text

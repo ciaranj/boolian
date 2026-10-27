@@ -62,6 +62,29 @@ FALLBACK_LINES = [
     ("mischievous", "none", "Oops, my brain went all misty for a moment. Ask me something else?"),
 ]
 
+# Said when he's spoken and nobody has answered for a while (the last one when he gives up).
+NUDGE_LINES = [
+    ("curious", "peek", "Hellooo? Is anybody still there? Don't be shy!"),
+    ("curious", "tilt", "Hmm, you've gone very quiet. Did I scare you? Please say I scared you!"),
+    ("mischievous", "bounce", "Go on, ask me anything. I know all the best ghost secrets!"),
+]
+LONELY_LINES = [
+    ("neutral", "none", "Oh well. I'll just float here and practise my spooky faces then."),
+    ("confused", "tilt", "Gone already? Ghosts get so lonely. Come back soon!"),
+]
+
+_GOODBYE = re.compile(
+    r"\b(good ?bye|bye|bye ?bye|farewell|see (you|ya)|gotta go|got to go|(have|need) to go|we('re| are) going"
+    r"|(we're|we are|i'm|i am) leaving|good ?night|night night|cheerio|ta ?ta)\b",
+    re.IGNORECASE,
+)
+
+
+def is_goodbye(text: str) -> bool:
+    """A visitor taking their leave, so the next group gets a ghost who hasn't met them."""
+    return bool(_GOODBYE.search(text))
+
+
 # Said the instant a visitor stops talking, while a slow voice prepares the real reply.
 FILLER_LINES = ["Ooooh!", "Hmm, ooh...", "[chuckle] Ooh!", "Hmmm...", "Ooh, ooh!"]
 

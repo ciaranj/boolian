@@ -142,3 +142,56 @@ async def test_fast_voice_has_no_filler():
     await convo.handle_json({"type": "text", "text": "hello"})
     await finish(convo)
     assert rec.types().index("expression") < rec.types().index("speech_start")
+
+
+async def test_quiet_visitor_is_nudged_then_forgotten():
+    convo, rec = make()
+    object.__setattr__(convo.cfg, "nudge_s", 10)
+    object.__setattr__(convo.cfg, "max_nudges", 2)
+    object.__setattr__(convo.cfg, "idle_reset_s", 30)
+    await convo.handle_json({"type": "text", "text": "hello"})
+    await finish(convo)
+    history = list(convo.history)
+
+    await convo.idle_tick()  # not quiet long enough yet
+    assert not convo.busy
+    for n in (1, 2):
+        convo.last_activity -= 11
+        await convo.idle_tick()
+        await finish(convo)
+        assert convo.nudges == n
+    assert list(convo.history) == history  # the prompting isn't remembered
+    assert rec.types().count("speech_start") == 3
+
+    convo.last_activity -= 11
+    await convo.idle_tick()  # nudged out; not yet time to forget them
+    assert not convo.busy and convo.history
+    convo.last_activity -= 20
+    await convo.idle_tick()
+    assert not convo.history and rec.json[-1]["reason"] == "idle"
+
+
+async def test_answering_a_nudge_resets_the_count():
+    convo, _rec = make()
+    object.__setattr__(convo.cfg, "nudge_s", 10)
+    await convo.handle_json({"type": "text", "text": "hello"})
+    await finish(convo)
+    convo.last_activity -= 11
+    await convo.idle_tick()
+    await finish(convo)
+    await convo.handle_json({"type": "text", "text": "I'm a witch"})
+    await finish(convo)
+    assert convo.nudges == 0
+
+
+async def test_goodbye_forgets_the_visitor_after_he_says_goodbye():
+    convo, rec = make()
+    await convo.handle_json({"type": "text", "text": "I'm a pumpkin"})
+    await finish(convo)
+    await convo.handle_json({"type": "text", "text": "OK bye Boolian!"})
+    await finish(convo)
+    assert not convo.history
+    types = rec.types()
+    assert types[-1] == "session_reset" and rec.json[-1]["reason"] == "goodbye"
+    assert types.index("speech_end", len(types) - 6) < len(types) - 1  # he still said goodbye
+    assert "cancel" not in types[-6:]  # and it wasn't cut off
