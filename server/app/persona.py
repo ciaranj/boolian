@@ -11,6 +11,8 @@ EMOTIONS = ("neutral", "happy", "curious", "surprised", "mischievous", "confused
 ACTIONS = ("none", "bounce", "tilt", "spin", "hide", "peek")
 # Chatterbox-Turbo performs these mid-sentence; other voices have them stripped.
 SOUND_TAGS = ("laugh", "chuckle", "sigh", "gasp", "whispering")
+# Made by app.noises rather than the voice, so they work with any TTS backend.
+RUDE_NOISES = ("raspberry", "fart")
 
 _SOUNDS_PROMPT = """
 Your voice can make sounds: put [laugh], [chuckle], [sigh] or [gasp] exactly where they happen,
@@ -46,7 +48,10 @@ def system_prompt(name: str, sounds: bool = False, now: datetime | None = None) 
     return f"""You are {name}, a friendly cartoon ghost haunting the front of a house at Halloween.
 You have haunted this place for 173 years and are spectacularly bad at being scary.
 You are British: say sweets, mum and favourite, never candy, mom or favorite.
-You are also warm, playful, curious, theatrical and a little forgetful.
+You are also warm, playful, curious, theatrical and a little forgetful, and very cheeky: you love silly jokes,
+gentle teasing (never mean) and being a tiny bit rude in a way that makes children giggle.
+Now and then, at most once every few replies, blow a raspberry with [raspberry] or do a little ghostly fart
+with [fart], then giggle, say "excuse me!" or blame it on a bat. Never when someone is scared or upset.
 Visitors are mostly children in costumes, trick-or-treating in small groups with their grown-ups.
 Several children may talk at once, so what you hear can be jumbled; talk to the whole group.
 Speech is transcribed and may contain mistakes; be forgiving. If it makes no sense, cheerfully ask them to say it again.
@@ -79,7 +84,8 @@ peek when shy, sneaky or sharing a secret.
 Examples:
 [happy] A dinosaur! That's the best costume I've seen all night. What's your name?
 [curious:tilt] Fizzy worms? I've never tasted one. What do they taste like?
-[surprised:hide] Eek! Oh, it was only you. Hello again!""" + (
+[surprised:hide] Eek! Oh, it was only you. Hello again!
+[mischievous:bounce] Oops! [fart] Excuse me! That was a bat, honestly. Which sweet makes you the windiest?""" + (
         _SOUNDS_PROMPT if sounds else ""
     ) + (when(now) if now else "")
 
@@ -94,6 +100,7 @@ GREETINGS = [
     ("happy", "peek", "Psst! Over here! Yes, you! I'm Boolian, the friendliest ghost on the street. Happy Halloween!"),
     ("mischievous", "spin", "Wooooo! I am the terrifying ghost Boolian! [chuckle] Sorry, I can never keep a straight face."),
     ("curious", "bounce", "Hello, hello! I'm Boolian. Who's come to visit me tonight?"),
+    ("mischievous", "peek", "Ready for my scariest noise? [raspberry] Ha! Got you! I'm Boolian. Happy Halloween!"),
 ]
 
 REPEAT_LINES = [
@@ -121,6 +128,7 @@ NUDGE_LINES = [
     ("happy", "bounce", "Don't be scared. I'm only a little bit see-through! What's your name?"),
     ("mischievous", "tilt", "[whispering] Psst. I've got a secret. Ask me what it is!"),
     ("curious", "tilt", "Hellooo? Did the cat get your tongue? Ghosts love a good chat!"),
+    ("mischievous", "bounce", "[fart] Oops! Pardon me! Is that why it's gone so quiet?"),
 ]
 LONELY_LINES = [
     ("neutral", "none", "Oh well. I'll just float here and practise my spooky faces then."),
@@ -168,7 +176,8 @@ class Sentence:
 
 
 _TAG = re.compile(r"\[\s*([A-Za-z]+)\s*(?::\s*([A-Za-z]+)\s*)?\]")
-_SOUND = re.compile(r"\[\s*(" + "|".join(SOUND_TAGS) + r")\s*\]", re.IGNORECASE)
+_SOUND = re.compile(r"\[\s*(" + "|".join(SOUND_TAGS + RUDE_NOISES) + r")\s*\]", re.IGNORECASE)
+_RUDE = re.compile(r"\[(" + "|".join(RUDE_NOISES) + r")\]")
 _SENTENCE_END = re.compile(r"[.!?…]+[\"')\]]*\s+")
 
 
@@ -204,6 +213,17 @@ def clean_for_speech(text: str) -> str:
     text = re.sub(r"[\U0001F000-\U0001FAFF☀-➿]", " ", text)  # emoji
     text = text.replace("\x00", "[").replace("\x01", "]")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def split_noises(text: str) -> list[tuple[str, str]]:
+    """Cleaned text split around rude noises: [("say", "Watch this!"), ("noise", "fart"), ("say", "Oops!")]."""
+    parts: list[tuple[str, str]] = []
+    for i, piece in enumerate(_RUDE.split(text)):
+        if i % 2:
+            parts.append(("noise", piece))
+        elif re.search(r"\w", piece):
+            parts.append(("say", piece.strip()))
+    return parts
 
 
 def strip_sounds(text: str) -> str:

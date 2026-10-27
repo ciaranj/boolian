@@ -67,7 +67,7 @@ Malformed frames are dropped and logged.
 |---|---|---|
 | 0–3 | ASCII | `GHAU` |
 | 4 | u8 | version = 1 |
-| 5 | u8 | flags (bit 0 = last chunk; currently unused) |
+| 5 | u8 | flags: bit 0 = last chunk (currently unused); bit 1 = a raspberry, bit 2 = a fart. A rude noise is sent as one chunk, so the presenter can animate as it plays. |
 | 6–7 | u16 | reserved |
 | 8–11 | u32 | generation id |
 | 12–15 | u32 | chunk sequence within the generation |

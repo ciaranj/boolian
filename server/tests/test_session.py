@@ -16,13 +16,15 @@ class Recorder:
     def __init__(self):
         self.json: list[dict] = []
         self.audio: list[tuple[int, int]] = []
+        self.flags: list[int] = []
 
     async def send_json(self, m):
         self.json.append(m)
 
     async def send_bytes(self, b):
-        _magic, _v, _f, _r, gen, seq, _sr = OUT_HEADER.unpack_from(b)
+        _magic, _v, flags, _r, gen, seq, _sr = OUT_HEADER.unpack_from(b)
         self.audio.append((gen, seq))
+        self.flags.append(flags)
 
     def types(self):
         return [m["type"] for m in self.json]
@@ -204,3 +206,16 @@ async def test_goodbye_forgets_the_visitor_after_he_says_goodbye():
     assert types[-1] == "session_reset" and rec.json[-1]["reason"] == "goodbye"
     assert types.index("speech_end", len(types) - 6) < len(types) - 1  # he still said goodbye
     assert "cancel" not in types[-6:]  # and it wasn't cut off
+
+
+async def test_rude_noise_is_one_flagged_chunk_in_the_speech():
+    from app.protocol import OUT_NOISE_FLAGS
+
+    convo, rec = make()
+    await convo.handle_json({"type": "say", "text": "Watch this! [fart] Oops! [raspberry] Ha!", "emotion": "mischievous", "action": "none"})
+    await finish(convo)
+    flagged = [i for i, f in enumerate(rec.flags) if f]
+    assert [rec.flags[i] for i in flagged] == [OUT_NOISE_FLAGS["fart"]]  # only the first noise in a reply plays
+    assert 0 < flagged[0] < len(rec.flags) - 1  # with speech either side of it
+    assert [s for _, s in rec.audio] == list(range(len(rec.audio)))
+    assert "[fart]" in rec.json[-1]["text"]  # he remembers doing it

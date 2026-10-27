@@ -94,6 +94,9 @@ function startStage() {
         report({ s: "latency", text: `end of speech → audible: ${ms.toFixed(0)} ms (p50 ${p(0.5)}, p95 ${p(0.95)}, n=${latencies.length})` });
       }
     },
+    onNoise(kind, seconds) {
+      ghost.rude(kind, seconds);
+    },
     onEnd(gen, reason) {
       link.send({ type: "playback", generation_id: gen, event: reason });
       tailUntil = performance.now() + 600;
@@ -172,7 +175,7 @@ function startStage() {
     }
   };
 
-  link.onAudio = (c) => out.enqueue(c.gen, c.sampleRate, c.pcm);
+  link.onAudio = (c) => out.enqueue(c.gen, c.sampleRate, c.pcm, c.noise);
 
   // ---------------------------------------------------------------- conversation state
 
@@ -283,7 +286,7 @@ function startStage() {
     // Offline fallback: the browser's own voice with a pretend mouth, so puppet mode always works.
     if (!("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    const u = new SpeechSynthesisUtterance(text.replace(/\[[a-z]+\]/gi, " ")); // it would read "[laugh]" out
     u.pitch = 1.25;
     u.rate = 0.95;
     u.onstart = () => {
@@ -505,12 +508,14 @@ function startStage() {
   window.addEventListener("resize", resize);
   resize();
 
-  // Art/debug mode without a server: ?state=speaking&emotion=happy&mouth=0.6
+  // Art/debug mode without a server: ?state=speaking&emotion=happy&mouth=0.6 (&rude=fart)
   const debugMouth = q.has("mouth") ? Number(q.get("mouth")) : null;
   if (q.get("state")) {
     setConv(q.get("state") as ConvState);
     if (q.get("emotion")) ghost.express(asEmotion(q.get("emotion")), asAction(q.get("action")), 1, 1e9);
     for (let i = 0; i < 60; i++) ghost.update(0.05); // settle the pose for screenshots
+    const rude = q.get("rude"); // &rude=fart or &rude=raspberry repeats the animation (without the sound)
+    if (rude === "fart" || rude === "raspberry") setInterval(() => ghost.rude(rude, 2), 3000);
   }
 
   let last = performance.now();

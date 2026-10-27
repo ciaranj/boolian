@@ -145,6 +145,8 @@ export class Ghost3D {
   private lastT = 0;
   private lastAction: string | null = null;
   private lastEmotion = "neutral";
+  private lastRude: { since: number } | null = null;
+  private mouthVertex = 0; // the body vertex nearest his mouth, where raspberry spit comes from
   private pulse = 0; // a ripple running down the sheet after a burst
   private rim = { value: 0 };
   private rimColor = { value: new THREE.Color() };
@@ -181,6 +183,11 @@ export class Ghost3D {
 
     // ---- body: one deforming mesh, with the face, outline and halo sharing its vertices
     this.rest = this.buildBody();
+    let best = Infinity;
+    for (let v = 0; v < ROWS * COLS; v++) {
+      const d = Math.hypot(this.rest[v * 3], this.rest[v * 3 + 1] - 45) - this.rest[v * 3 + 2] * 0.01;
+      if (this.rest[v * 3 + 2] > 0 && d < best) [best, this.mouthVertex] = [d, v];
+    }
     this.bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, side: THREE.DoubleSide });
     // Glowing edges, like light through a thin sheet; the bloom picks them up.
     this.bodyMat.onBeforeCompile = (shader) => {
@@ -420,8 +427,37 @@ export class Ghost3D {
     const emo = g.currentEmotion;
     if (emo !== this.lastEmotion && (emo === "surprised" || emo === "happy") && g.currentIntensity > 0.5) this.burst(emo);
     this.lastEmotion = emo;
+    this.rudeEffects();
 
     this.sparks.update(dt);
+  }
+
+  /** A green puff from the hem for a fart (and a ripple through the sheet); spit flying for a raspberry. */
+  private rudeEffects() {
+    const r = this.ghost.currentRude;
+    const fresh = r !== null && (this.lastRude === null || r.since < this.lastRude.since);
+    this.lastRude = r;
+    if (!r) return;
+    if (r.kind === "fart" && fresh) {
+      this.pulse = 1;
+      const hem = (ROWS - 1) * COLS;
+      for (let i = 0; i < 70; i++) {
+        const j = Math.floor(Math.random() * COLS);
+        const p = this.vertexInRoot(hem - COLS * Math.floor(Math.random() * 3) + j, this.tmp);
+        const u = (j / COLS) * Math.PI * 2;
+        const d = this.dirInRoot(Math.sin(u), -0.6 + Math.random() * 0.5, Math.cos(u) - 0.6, 0.35 + Math.random() * 0.5);
+        this.sparks.spawn({ x: p.x, y: p.y, z: p.z, vx: d.x, vy: d.y, vz: d.z, life: 1.4 + Math.random() * 1.2,
+          size: 0.22 + Math.random() * 0.3, color: this.tmpColor.setHSL(0.2 + Math.random() * 0.08, 0.75, 0.55),
+          drag: 1.6, lift: 0.25, alpha: 0.4 });
+      }
+    } else if (r.kind === "raspberry" && r.since < r.dur) {
+      const p = this.vertexInRoot(this.mouthVertex, this.tmp);
+      for (let i = 0; i < 3; i++) {
+        const d = this.dirInRoot((Math.random() - 0.5) * 1.2, -0.1 + Math.random() * 0.5, 1, 1 + Math.random() * 1.2);
+        this.sparks.spawn({ x: p.x, y: p.y, z: p.z, vx: d.x, vy: d.y, vz: d.z, life: 0.4 + Math.random() * 0.4,
+          size: 0.03 + Math.random() * 0.03, color: this.tmpColor.setRGB(0.85, 0.95, 1), drag: 1, lift: -3, alpha: 0.9 });
+      }
+    }
   }
 
   private burst(kind: "spin" | "hide" | "peek" | "surprised" | "happy") {

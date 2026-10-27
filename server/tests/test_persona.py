@@ -105,3 +105,27 @@ def test_date_and_rough_time_of_day():
     assert system_prompt("Boolian", now=datetime(2026, 10, 31, 19, 1)) == system_prompt("Boolian", now=datetime(2026, 10, 31, 20, 59))
     assert "bedtime" in system_prompt("Boolian", now=datetime(2026, 10, 31, 21, 30))
     assert system_prompt("Boolian", now=datetime(2026, 10, 27, 20, 0)).endswith("Today is Tuesday 27 October 2026. It is evening.")
+
+
+def test_rude_noises_are_split_out_of_the_speech():
+    from app.persona import split_noises
+
+    text = clean_for_speech("Watch this! [Fart] Oops, excuse me!")
+    assert split_noises(text) == [("say", "Watch this!"), ("noise", "fart"), ("say", "Oops, excuse me!")]
+    assert split_noises("[raspberry]") == [("noise", "raspberry")]
+    assert split_noises("No noises [chuckle] here.") == [("say", "No noises [chuckle] here.")]
+    events = run(list("[raspberry] Ha! Got you."))
+    assert events[0] == Expression("neutral", "none", 0.5) and "[raspberry]" in events[1].text
+
+
+def test_rude_noises_use_the_recordings_at_the_voice_rate():
+    import numpy as np
+
+    from app import noises
+
+    for kind in noises.KINDS:
+        variants = noises._recordings(kind, 24_000)
+        assert variants, f"no {kind} recordings in {noises.ASSETS}"
+        for y in variants:
+            assert 0.1 < len(y) / 24_000 < 2.5 and np.abs(y).max() <= 0.85
+        assert len(noises.pcm(kind, 24_000)) % 2 == 0

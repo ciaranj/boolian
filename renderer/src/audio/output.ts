@@ -3,9 +3,13 @@
  * when audio is *actually* audible (including Bluetooth / output latency).
  */
 
+import type { RudeNoise } from "../protocol";
+
 export interface OutputEvents {
   onStart(gen: number): void;
   onEnd(gen: number, reason: "ended" | "cancelled"): void;
+  /** A rude noise is reaching the visitor's ears now. */
+  onNoise?(kind: RudeNoise, seconds: number): void;
 }
 
 const START_LEAD_S = 0.12; // jitter cushion before the first chunk of a reply
@@ -122,7 +126,7 @@ export class AudioOut {
     this.nextTime = 0;
   }
 
-  enqueue(gen: number, sampleRate: number, pcm: Int16Array) {
+  enqueue(gen: number, sampleRate: number, pcm: Int16Array, noise: RudeNoise | null = null) {
     const ctx = this.ctx;
     if (!ctx || gen <= this.rejectUpTo || pcm.length === 0) return;
     if (gen !== this.gen) {
@@ -146,6 +150,12 @@ export class AudioOut {
       setTimeout(() => {
         if (this.gen === g && this.started) this.events.onStart(g);
       }, delayMs);
+    }
+    if (noise) {
+      const g = gen;
+      setTimeout(() => {
+        if (this.gen === g && this.started) this.events.onNoise?.(noise, buf.duration);
+      }, (this.nextTime - now + this.latencyS) * 1000);
     }
     this.nextTime += buf.duration;
     this.sources.add(src);

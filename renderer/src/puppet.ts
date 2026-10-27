@@ -17,4 +17,6 @@ export const PUPPET_LINES: PuppetLine[] = [
   { emotion: "confused", action: "tilt", text: "Pardon? My ears are a bit foggy tonight. Could you say that again?" },
   { emotion: "curious", action: "none", text: "Hmm, let me think about that. Ghosts think very, very slowly." },
   { emotion: "happy", action: "bounce", text: "Goodbye! Come back and haunt me again soon!" },
+  { emotion: "mischievous", action: "peek", text: "Ready for my scariest noise? [raspberry] Ha! Got you!" },
+  { emotion: "mischievous", action: "bounce", text: "Oops! [fart] Excuse me! That was a bat, honestly." },
 ];

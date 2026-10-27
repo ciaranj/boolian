@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 
-from . import persona
+from . import noises, persona
 from .config import Config
 from .metrics import Metrics, TurnTiming
 from .persona import Expression, ReplyParser, Sentence
@@ -351,15 +351,26 @@ class Conversation:
         seq = 0
         started = False
         stop_after = False
+        rude = False  # one rude noise per reply is plenty
+
+        async def send_audio(pcm: bytes, noise: str | None = None) -> bool:
+            nonlocal seq, started
+            if not started:
+                started = await self._send(gen, {
+                    "type": "speech_start",
+                    "audio_format": {"codec": "pcm_s16le", "sample_rate": self.tts.sample_rate, "channels": 1},
+                })
+            if gen != self.generation:
+                return False
+            await self._send_bytes(pack_audio_chunk(gen, seq, self.tts.sample_rate, pcm, noise=noise))
+            seq += 1
+            return True
+
         if filler:
-            started = await self._send(gen, {
-                "type": "speech_start",
-                "audio_format": {"codec": "pcm_s16le", "sample_rate": self.tts.sample_rate, "channels": 1},
-            })
             step = self.tts.sample_rate // 4 * 2  # 250 ms per message, like the voices
-            for i in range(0, len(filler) if started else 0, step):
-                await self._send_bytes(pack_audio_chunk(gen, seq, self.tts.sample_rate, filler[i : i + step]))
-                seq += 1
+            for i in range(0, len(filler), step):
+                if not await send_audio(filler[i : i + step]):
+                    break
         while not stop_after:
             if first_timeout is not None and not spoken:
                 try:
@@ -377,23 +388,23 @@ class Conversation:
             if gen != self.generation:
                 break
             try:
-                text = item.text if self.tts.sound_tags else persona.strip_sounds(item.text)
-                # aclosing: when a reply is cancelled mid-sentence, the voice must stop (and release the
-                # GPU) now, not whenever the abandoned generator happens to be garbage collected.
-                async with contextlib.aclosing(self.tts.synth(text)) as audio:
-                    async for pcm in audio:
-                        timing.mark("first_tts_chunk_ms")
-                        if not started:
-                            started = True
-                            await self._send(gen, {
-                                "type": "speech_start",
-                                "audio_format": {"codec": "pcm_s16le", "sample_rate": self.tts.sample_rate, "channels": 1},
-                            })
-                        if gen != self.generation:
-                            return spoken
-                        await self._send_bytes(pack_audio_chunk(gen, seq, self.tts.sample_rate, pcm))
-                        seq += 1
-                        timing.mark("first_audio_sent_ms")
+                for kind, part in persona.split_noises(item.text):
+                    if kind == "noise":
+                        # One flagged chunk, so the presenter animates exactly as it's heard.
+                        if not rude:
+                            rude = True
+                            if not await send_audio(noises.pcm(part, self.tts.sample_rate), noise=part):
+                                return spoken
+                        continue
+                    text = part if self.tts.sound_tags else persona.strip_sounds(part)
+                    # aclosing: when a reply is cancelled mid-sentence, the voice must stop (and release the
+                    # GPU) now, not whenever the abandoned generator happens to be garbage collected.
+                    async with contextlib.aclosing(self.tts.synth(text)) as audio:
+                        async for pcm in audio:
+                            timing.mark("first_tts_chunk_ms")
+                            if not await send_audio(pcm):
+                                return spoken
+                            timing.mark("first_audio_sent_ms")
             except asyncio.CancelledError:
                 raise
             except Exception as e:

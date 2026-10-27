@@ -6,6 +6,7 @@ export const EMOTIONS = ["neutral", "happy", "curious", "surprised", "mischievou
 export const ACTIONS = ["none", "bounce", "tilt", "spin", "hide", "peek"] as const;
 export type Emotion = (typeof EMOTIONS)[number];
 export type Action = (typeof ACTIONS)[number];
+export type Rude = "raspberry" | "fart";
 
 export interface GhostSettings {
   scale: number;
@@ -45,6 +46,7 @@ const FACES: Record<Emotion, Partial<Face>> = {
 
 const INK = "#191330";
 const DRAMATIC: Action[] = ["spin", "hide", "peek"];
+const RUDE_AFTERGLOW = 1.2; // seconds the smug face and fart cloud linger after the noise
 
 interface ActiveAction {
   kind: "spin" | "hide" | "peek";
@@ -118,6 +120,7 @@ export class Ghost {
   private nextFlourish = 40;
   private stateSince = 0;
   private wisps: Wisp[] = [];
+  private rudeNoise: { kind: Rude; start: number; dur: number } | null = null;
   private lastX = 0;
   private drag = 0;
 
@@ -148,6 +151,17 @@ export class Ghost {
     this.emotionUntil = this.t + durationMs / 1000;
     if (emotion === "surprised") this.glowBoost = 0.8;
     this.doAction(action, this.intensity);
+  }
+
+  /** A rude noise is being heard: tongue out for a raspberry; a jolt, a shocked face, then a smug grin for a fart. */
+  rude(kind: Rude, seconds: number) {
+    this.rudeNoise = { kind, start: this.t, dur: Math.max(0.4, seconds) };
+    if (kind === "fart") {
+      this.bounce.kick(-520);
+      this.squash.kick(2.8);
+    } else {
+      this.squash.kick(1.5);
+    }
   }
 
   /** Let the current emotion fade shortly (e.g. when speech finishes). */
@@ -182,7 +196,8 @@ export class Ghost {
     this.updateFace(dt);
     this.updateEyes(dt);
 
-    const target = this.state === "speaking" ? clamp(this.speechLevel, 0, 1) : 0;
+    // The noise isn't speech, so the mouth doesn't flap to it (a raspberry shows the tongue instead).
+    const target = this.state === "speaking" && !this.rudeNow ? clamp(this.speechLevel, 0, 1) : 0;
     this.mouth = approach(this.mouth, target, target > this.mouth ? 28 : 13, dt);
 
     this.lean = approach(this.lean, this.state === "listening" ? 1 : 0, 5, dt);
@@ -192,6 +207,7 @@ export class Ghost {
     this.squash.step(dt);
     this.tilt.step(dt);
     if (this.action && t - this.action.start > this.action.dur) this.action = null;
+    if (this.rudeNoise && t - this.rudeNoise.start > this.rudeNoise.dur + RUDE_AFTERGLOW) this.rudeNoise = null;
 
     if (this.state === "speaking" && this.speechLevel > 0.55 && this.rand() < dt * 1.2) this.squash.kick(1.2);
 
@@ -257,6 +273,18 @@ export class Ghost {
     // Squinty ^^ eyes look odd while talking a lot; soften them during speech.
     if (this.state === "speaking") target.happyArc *= 0.6;
 
+    const r = this.rudeNoise;
+    if (r) {
+      const since = this.t - r.start;
+      if (r.kind === "raspberry" && since < r.dur) {
+        Object.assign(target, { happyArc: 1, blush: 1, browAngle: 0.35, browL: 0.3, browR: 0.3, smile: 0.2, round: 0, skew: 0 });
+      } else if (r.kind === "fart" && since < 0.3) {
+        Object.assign(target, { eyeScale: 1.35, browL: 1, browR: 1, round: 1, smile: 0, happyArc: 0, lid: 0 });
+      } else if (r.kind === "fart") {
+        Object.assign(target, { browAngle: 0.45, eyeSquash: 0.7, smile: 0.95, skew: 0.9, blush: 0.9, happyArc: 0, round: 0, lid: 0.15 });
+      }
+    }
+
     for (const key of Object.keys(target) as (keyof Face)[]) {
       this.face[key] = approach(this.face[key], target[key], 7, dt);
     }
@@ -296,6 +324,12 @@ export class Ghost {
 
   private pose(): Pose {
     const pose: Pose = { dx: 0, dy: 0, rot: 0, spin: 0, alpha: 1, sx: 1, sy: 1 };
+    const r = this.rudeNoise;
+    if (r) {
+      const since = this.t - r.start;
+      if (r.kind === "raspberry" && since < r.dur) pose.dx += Math.sin(since * 70) * 2.2; // buzzing
+      if (r.kind === "fart") pose.rot += Math.sin(since * 28) * 0.06 * Math.exp(-since * 3); // a startled wobble
+    }
     const a = this.action;
     if (!a) return pose;
     const p = clamp((this.t - a.start) / a.dur, 0, 1);
@@ -390,6 +424,15 @@ export class Ghost {
   get currentAction(): "spin" | "hide" | "peek" | null {
     return this.action?.kind ?? null;
   }
+  /** The rude noise being heard right now, if any (its after-effects linger a little longer). */
+  get currentRude(): { kind: Rude; since: number; dur: number } | null {
+    const r = this.rudeNoise;
+    return r ? { kind: r.kind, since: this.t - r.start, dur: r.dur } : null;
+  }
+  private get rudeNow(): boolean {
+    const r = this.rudeNoise;
+    return !!r && this.t - r.start < r.dur;
+  }
   get wispList(): readonly Wisp[] {
     return this.wisps;
   }
@@ -420,6 +463,7 @@ export class Ghost {
       ctx.stroke();
     } else {
       this.drawBody(ctx, l.glow, unit);
+      this.drawFartCloud(ctx);
       this.drawFace(ctx);
       if (this.state === "thinking") this.drawThinkingDots(ctx);
       if (this.state === "sleeping") this.drawZzz(ctx);
@@ -615,7 +659,32 @@ export class Ghost {
     const cr = my - f.smile * 5 - sk;
     ctx.save();
     ctx.translate(mx, 0);
-    if (o < 0.07 && f.round < 0.3) {
+    if (this.rudeNow && this.rudeNoise!.kind === "raspberry") {
+      // Pursed lips with the tongue poking out, fluttering.
+      const flutter = Math.sin(this.t * 60) * 1.5;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(-14, my);
+      ctx.quadraticCurveTo(0, my - 5, 14, my);
+      ctx.stroke();
+      ctx.fillStyle = "#ff7fa8";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-10, my + 1);
+      ctx.lineTo(-10, my + 12 + flutter);
+      ctx.quadraticCurveTo(-10, my + 24 + flutter, 0, my + 24 + flutter);
+      ctx.quadraticCurveTo(10, my + 24 + flutter, 10, my + 12 + flutter);
+      ctx.lineTo(10, my + 1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = "#d9507c";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, my + 5);
+      ctx.lineTo(0, my + 16 + flutter);
+      ctx.stroke();
+    } else if (o < 0.07 && f.round < 0.3) {
       ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(-w / 2, cl);
@@ -639,6 +708,24 @@ export class Ghost {
       }
     }
     ctx.restore();
+  }
+
+  /** A little green cloud puffing out from under his tail (the 3D view adds particles too). */
+  private drawFartCloud(ctx: CanvasRenderingContext2D) {
+    const r = this.rudeNoise;
+    if (!r || r.kind !== "fart") return;
+    const p = (this.t - r.start) / (r.dur + RUDE_AFTERGLOW);
+    if (p >= 1) return;
+    for (let i = 0; i < 7; i++) {
+      const side = i % 2 ? 1 : -1;
+      const x = side * (20 + i * 14) * (0.4 + p * 1.4);
+      const y = 175 + (i % 3) * 8 + p * 25 - p * p * 40;
+      const rad = (10 + i * 2) * (0.5 + p * 1.6);
+      ctx.fillStyle = `rgba(${150 + i * 8}, 215, ${80 + i * 6}, ${0.45 * (1 - p) * Math.min(1, p * 8)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   /** In ghost units around the body centre; the 3D renderer paints it onto a texture. */

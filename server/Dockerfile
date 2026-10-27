@@ -9,6 +9,7 @@ ENV PATH=/venv/bin:$PATH PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY pyproject.toml ./
 COPY app ./app
+COPY assets ./assets
 RUN pip install --no-cache-dir '.[gpu]'
 
 EXPOSE 8765

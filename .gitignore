@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 infra/models/
 *.wav
+!server/assets/noises/*.wav
 .DS_Store
 *.egg-info/
 spectre.env

@@ -6,11 +6,14 @@ const OUT_MAGIC = [0x47, 0x48, 0x41, 0x55]; // "GHAU"
 const MIC_HEADER = 16;
 const OUT_HEADER = 20;
 
+export type RudeNoise = "raspberry" | "fart";
+
 export interface AudioChunk {
   gen: number;
   seq: number;
   sampleRate: number;
   last: boolean;
+  noise: RudeNoise | null; // this chunk is a rude noise, not speech
   pcm: Int16Array;
 }
 
@@ -39,6 +42,7 @@ export function parseAudioChunk(buf: ArrayBuffer): AudioChunk | null {
   const dv = new DataView(buf);
   for (let i = 0; i < 4; i++) if (dv.getUint8(i) !== OUT_MAGIC[i]) return null;
   if (dv.getUint8(4) !== VERSION) return null;
+  const flags = dv.getUint8(5);
   const n = (buf.byteLength - OUT_HEADER) >> 1;
   const pcm = new Int16Array(n);
   for (let i = 0; i < n; i++) pcm[i] = dv.getInt16(OUT_HEADER + i * 2, true);
@@ -46,7 +50,8 @@ export function parseAudioChunk(buf: ArrayBuffer): AudioChunk | null {
     gen: dv.getUint32(8),
     seq: dv.getUint32(12),
     sampleRate: dv.getUint32(16),
-    last: (dv.getUint8(5) & 1) === 1,
+    last: (flags & 1) === 1,
+    noise: flags & 2 ? "raspberry" : flags & 4 ? "fart" : null,
     pcm,
   };
 }

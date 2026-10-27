@@ -16,6 +16,8 @@ MIC_SAMPLE_RATE = 16_000
 OUT_MAGIC = b"GHAU"
 OUT_HEADER = struct.Struct(">4sBBHIII")  # magic, version, flags, reserved, generation, seq, sample_rate
 OUT_FLAG_LAST = 0x01
+# This chunk is a rude noise, not speech, so the presenter can play its animation in time with it.
+OUT_NOISE_FLAGS = {"raspberry": 0x02, "fart": 0x04}
 
 
 class FrameError(ValueError):
@@ -49,6 +51,6 @@ def pack_mic_frame(seq: int, capture_ms: int, pcm: bytes) -> bytes:
     return MIC_HEADER.pack(MIC_MAGIC, PROTOCOL_VERSION, 0, len(pcm), seq & 0xFFFFFFFF, capture_ms & 0xFFFFFFFF) + pcm
 
 
-def pack_audio_chunk(generation: int, seq: int, sample_rate: int, pcm: bytes, last: bool = False) -> bytes:
-    flags = OUT_FLAG_LAST if last else 0
+def pack_audio_chunk(generation: int, seq: int, sample_rate: int, pcm: bytes, last: bool = False, noise: str | None = None) -> bytes:
+    flags = (OUT_FLAG_LAST if last else 0) | OUT_NOISE_FLAGS.get(noise or "", 0)
     return OUT_HEADER.pack(OUT_MAGIC, PROTOCOL_VERSION, flags, 0, generation, seq, sample_rate) + pcm
