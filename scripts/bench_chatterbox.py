@@ -162,7 +162,7 @@ async def main() -> int:
         print("\n[original loop, LLM busy]")
         results["original+llm"] = await timed("original", original, model, llm, "original-busy")
 
-    chatterbox_fast.prepare(model)  # converts the transformer to bf16; the original loop can't run after this
+    chatterbox_fast.prepare(model)
     for warm in LINES[:2]:
         chatterbox_fast.generate(model, warm)
     print("\n[where the time goes, fast loop]")
@@ -171,7 +171,7 @@ async def main() -> int:
     chatterbox_fast.watermarker_to(model, model.device)
     model.watermarker.apply_watermark(np.zeros(24_000, dtype=np.float32), sample_rate=model.sr)  # warm-up
     profile(model, "watermark on GPU")
-    print(f"\n[fast loop] transformer dtype {model.t3.tfmr.dtype}")
+    print("\n[fast loop]")
     results["fast"] = await timed("fast", chatterbox_fast.generate, model, None, "fast")
     if has_llm:
         print("\n[fast loop, LLM busy]")

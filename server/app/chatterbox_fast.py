@@ -1,13 +1,13 @@
 """A faster speech-token loop for Chatterbox-Turbo.
 
-Same model and the same sampling as ChatterboxTurboTTS.generate() (temperature 0.8, top-k 1000,
+Same model, precision and sampling as ChatterboxTurboTTS.generate() (temperature 0.8, top-k 1000,
 top-p 0.95, repetition penalty 1.2, applied in that order), but:
-- the transformer runs in bf16, halving the weights read for every token;
 - sampling works on the top-k slice, instead of sorting the whole vocabulary every step;
 - the stop token is checked every few steps, not after every token, so the CPU doesn't wait on
   the GPU each step and the GPU always has the next work queued.
 
 Chatterbox's own loop manages ~70 tokens/s (25 tokens = 1 s of speech) on an RTX 4060 Ti.
+(bf16 was tried: no faster there, and audibly worse, so the transformer stays in fp32.)
 """
 
 from __future__ import annotations
@@ -19,16 +19,12 @@ OOV_FROM = 6561  # speech tokens at or above this (start/stop) aren't audio, as 
 
 
 def prepare(model) -> None:
-    """Call once after loading: bf16 transformer, and the watermarker on the GPU.
+    """Call once after loading: put the watermarker on the GPU.
 
     Chatterbox builds its (Resemble Perth) watermarker on the CPU, where it runs a neural network
     over every sentence. Moving it to the GPU keeps the watermark, it just stops costing CPU time."""
-    if not str(model.device).startswith("cuda"):
-        return
-    tfmr = model.t3.tfmr
-    if torch.cuda.is_bf16_supported() and tfmr.dtype != torch.bfloat16:
-        tfmr.to(torch.bfloat16)
-    watermarker_to(model, model.device)
+    if str(model.device).startswith("cuda"):
+        watermarker_to(model, model.device)
 
 
 def watermarker_to(model, device) -> None:
