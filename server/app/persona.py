@@ -8,9 +8,16 @@ from dataclasses import dataclass
 
 EMOTIONS = ("neutral", "happy", "curious", "surprised", "mischievous", "confused")
 ACTIONS = ("none", "bounce", "tilt", "spin", "hide", "peek")
+# Chatterbox-Turbo performs these mid-sentence; other voices have them stripped.
+SOUND_TAGS = ("laugh", "chuckle", "sigh", "gasp", "whispering")
+
+_SOUNDS_PROMPT = """
+Your voice can make sounds: put [laugh], [chuckle], [sigh] or [gasp] exactly where they happen,
+or [whispering] before a secret. Use one now and then, never more than one per reply.
+Example: [mischievous:peek] Shall I tell you a secret? [whispering] I'm scared of the dark. [chuckle]"""
 
 
-def system_prompt(name: str) -> str:
+def system_prompt(name: str, sounds: bool = False) -> str:
     return f"""You are {name}, a friendly cartoon ghost appearing at a Halloween display.
 You have haunted this place for 173 years and are spectacularly bad at being scary.
 You are warm, playful, curious, theatrical and a little forgetful. You love modern gadgets.
@@ -31,7 +38,9 @@ Start EVERY reply with exactly one tag in square brackets choosing your emotion,
 [emotion] or [emotion:action]
 emotions: happy, curious, surprised, mischievous, confused, neutral
 actions: bounce, tilt, spin, hide, peek
-Example: [mischievous:spin] Wheee! Did you see that? I've been practising my twirls all century."""
+Example: [mischievous:spin] Wheee! Did you see that? I've been practising my twirls all century.""" + (
+        _SOUNDS_PROMPT if sounds else ""
+    )
 
 
 GREETINGS = [
@@ -73,6 +82,7 @@ class Sentence:
 
 
 _TAG = re.compile(r"\[\s*([A-Za-z]+)\s*(?::\s*([A-Za-z]+)\s*)?\]")
+_SOUND = re.compile(r"\[\s*(" + "|".join(SOUND_TAGS) + r")\s*\]", re.IGNORECASE)
 _SENTENCE_END = re.compile(r"[.!?…]+[\"')\]]*\s+")
 
 
@@ -89,12 +99,24 @@ def parse_tag(tag_text: str) -> Expression:
     return Expression(emotion, action)
 
 
+def is_sound(tag_text: str) -> bool:
+    return bool(_SOUND.fullmatch(tag_text.strip()))
+
+
 def clean_for_speech(text: str) -> str:
+    """Speakable text. Sound tags like [chuckle] survive, normalised; see strip_sounds()."""
     text = re.sub(r"\*[^*]*\*", " ", text)  # stage directions
+    text = _SOUND.sub(lambda m: f"\x00{m.group(1).lower()}\x01", text)
     text = _TAG.sub(" ", text)
     text = re.sub(r"[#_`~<>|{}\[\]]", " ", text)
     text = re.sub(r"[\U0001F000-\U0001FAFF☀-➿]", " ", text)  # emoji
+    text = text.replace("\x00", "[").replace("\x01", "]")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def strip_sounds(text: str) -> str:
+    """For voices that can't perform sound tags."""
+    return re.sub(r"\s+", " ", _SOUND.sub(" ", text)).strip()
 
 
 _FIRST_CLAUSE_END = re.compile(r"[,;:] | - | — ")
@@ -145,6 +167,11 @@ class ReplyParser:
             return []
         if buf.startswith("["):
             close = buf.find("]")
+            if close >= 0 and is_sound(buf[: close + 1]):
+                # "[chuckle] ..." has no emotion tag; the sound is part of the speech
+                self._tag_done = True
+                self._buf = buf
+                return [Expression("neutral", "none", 0.5)]
             if close < 0 and len(buf) < 40 and not final:
                 return []
             if close >= 0:
@@ -186,7 +213,8 @@ class ReplyParser:
     @staticmethod
     def _emit(raw: str) -> list[Expression | Sentence]:
         out: list[Expression | Sentence] = []
-        m = _TAG.search(raw)
+        # Only real emotions change the face; sounds and made-up tags like [smiles] don't reset it.
+        m = next((t for t in _TAG.finditer(raw) if t.group(1).lower() in EMOTIONS), None)
         if m:
             out.append(parse_tag(m.group(0)))
         text = clean_for_speech(raw)

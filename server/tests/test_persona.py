@@ -1,4 +1,4 @@
-from app.persona import Expression, ReplyParser, Sentence, clean_for_speech, is_unsafe, parse_tag
+from app.persona import Expression, ReplyParser, Sentence, clean_for_speech, is_unsafe, parse_tag, strip_sounds
 
 
 def run(tokens: list[str]) -> list:
@@ -56,3 +56,27 @@ def test_first_chunk_can_end_at_a_comma():
         "for oh so long, and I love it.",
         "Truly, madly, deeply.",
     ]
+
+
+def test_sound_tags_stay_in_speech_and_dont_change_the_face():
+    events = run(list("[happy:bounce] Boo! [chuckle] Did I scare you? [whispering] Don't tell anyone. [Advertisement] Buy now."))
+    assert events[0] == Expression("happy", "bounce")
+    assert all(isinstance(e, Sentence) for e in events[1:])  # neither sounds nor unknown tags change the face
+    assert [e.text for e in events[1:]] == ["Boo! [chuckle] Did I scare you?", "[whispering] Don't tell anyone.", "Buy now."]
+
+
+def test_reply_starting_with_a_sound_keeps_it():
+    events = run(list("[Laugh] Oh, that's a good one!"))
+    assert events[0] == Expression("neutral", "none", 0.5)
+    assert events[1].text == "[laugh] Oh, that's a good one!"
+
+
+def test_strip_sounds_for_voices_that_cant_perform_them():
+    assert strip_sounds("[chuckle] Did I scare you? [sigh]") == "Did I scare you?"
+
+
+def test_sound_instructions_only_when_the_voice_supports_them():
+    from app.persona import system_prompt
+
+    assert "[chuckle]" not in system_prompt("Boolian")
+    assert "[chuckle]" in system_prompt("Boolian", sounds=True)

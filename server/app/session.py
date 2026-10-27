@@ -249,7 +249,7 @@ class Conversation:
                 turns.append(dict(m))
         if turns and turns[0]["role"] == "assistant":
             turns.insert(0, {"role": "user", "content": "(Some visitors float up to you.)"})
-        return [{"role": "system", "content": persona.system_prompt(self.cfg.ghost_name)}, *turns]
+        return [{"role": "system", "content": persona.system_prompt(self.cfg.ghost_name, sounds=self.tts.sound_tags)}, *turns]
 
     async def _produce(self, gen: int, timing: TurnTiming, messages: list[dict], queue: asyncio.Queue, reply: dict) -> None:
         parser = ReplyParser()
@@ -321,7 +321,8 @@ class Conversation:
             if gen != self.generation:
                 break
             try:
-                async for pcm in self.tts.synth(item.text):
+                text = item.text if self.tts.sound_tags else persona.strip_sounds(item.text)
+                async for pcm in self.tts.synth(text):
                     timing.mark("first_tts_chunk_ms")
                     if not started:
                         started = True

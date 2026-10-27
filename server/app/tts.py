@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 class KokoroTTS:
     """Kokoro-FastAPI's OpenAI-compatible /audio/speech endpoint, streaming raw PCM."""
 
+    sound_tags = False
+
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.sample_rate = cfg.tts_sample_rate
@@ -58,6 +60,7 @@ class LocalKokoroTTS:
     """Kokoro running inside this process (pip `kokoro`), so no separate TTS service is needed."""
 
     sample_rate = 24_000
+    sound_tags = False
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -98,10 +101,62 @@ class LocalKokoroTTS:
         pass
 
 
+class ChatterboxTTS:
+    """Chatterbox-Turbo in-process (pip `chatterbox-tts`): more natural than Kokoro, clones a reference
+    voice, and performs [laugh]/[sigh]-style sound tags. Not streamed: each sentence is generated whole."""
+
+    sample_rate = 24_000
+    sound_tags = True
+    CHUNK = 24_000 // 4  # samples per message (250 ms)
+
+    def __init__(self, cfg: Config) -> None:
+        self.cfg = cfg
+        self.model = None
+        self.lock = asyncio.Lock()  # one synthesis at a time on the GPU
+
+    async def load(self) -> None:
+        import torch
+        from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+        device = self.cfg.tts_device
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        log.info("loading Chatterbox-Turbo (device=%s, voice=%s)", device, self.cfg.tts_voice_ref or "built-in")
+        self.model = await asyncio.to_thread(ChatterboxTurboTTS.from_pretrained, device)
+        if self.cfg.tts_voice_ref:
+            await asyncio.to_thread(self.model.prepare_conditionals, self.cfg.tts_voice_ref)
+        self.sample_rate = self.model.sr
+        await asyncio.to_thread(self._run, "Hello there.")  # warm-up
+        log.info("Chatterbox ready")
+
+    async def healthy(self) -> bool:
+        return self.model is not None
+
+    def _run(self, text: str) -> bytes:
+        wav = self.model.generate(text)
+        samples = wav.squeeze(0).detach().cpu().numpy()
+        return (np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes()
+
+    async def synth(self, text: str) -> AsyncIterator[bytes]:
+        if self.model is None:
+            raise RuntimeError("Chatterbox still loading")
+        if not text.strip():
+            return
+        async with self.lock:
+            pcm = await asyncio.to_thread(self._run, text)
+        step = self.CHUNK * 2
+        for i in range(0, len(pcm), step):
+            yield pcm[i : i + step]
+
+    async def aclose(self) -> None:
+        pass
+
+
 class MockTTS:
     """Ghostly babble: one warbling vowel per syllable, so the mouth has something to chew on."""
 
     sample_rate = 24_000
+    sound_tags = False
 
     async def healthy(self) -> bool:
         return True
@@ -132,9 +187,11 @@ class MockTTS:
         pass
 
 
-def make_tts(cfg: Config) -> KokoroTTS | LocalKokoroTTS | MockTTS:
+def make_tts(cfg: Config) -> KokoroTTS | LocalKokoroTTS | ChatterboxTTS | MockTTS:
     if cfg.tts_backend == "mock":
         return MockTTS()
     if cfg.tts_backend == "kokoro-local":
         return LocalKokoroTTS(cfg)
+    if cfg.tts_backend == "chatterbox":
+        return ChatterboxTTS(cfg)
     return KokoroTTS(cfg)

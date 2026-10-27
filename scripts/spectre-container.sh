@@ -3,6 +3,9 @@
 #
 #   scripts/spectre-container.sh setup      # once: system packages, Python venv, models, config file
 #   scripts/spectre-container.sh selftest   # GPU check: Kokoro speaks, Whisper hears it back, LLM answers
+#   scripts/spectre-container.sh add-chatterbox    # optional: install the Chatterbox-Turbo voice too
+#   scripts/spectre-container.sh selftest --compare  # time Kokoro vs Chatterbox, save WAVs to listen to
+#   scripts/spectre-container.sh undo-chatterbox   # put the environment back as it was before add-chatterbox
 #   scripts/spectre-container.sh run        # start the server (port 8765)
 #   scripts/spectre-container.sh service    # install + start a systemd unit so it survives reboots
 #
@@ -100,6 +103,9 @@ SPECTRE_STT_COMPUTE_TYPE=float16
 SPECTRE_TTS_BACKEND=kokoro-local
 SPECTRE_TTS_VOICE=bm_fable
 SPECTRE_TTS_DEVICE=cuda
+# After `add-chatterbox`: SPECTRE_TTS_BACKEND=chatterbox, and optionally a 10 s+ WAV of the voice to clone
+# (yours, or one you have permission to use). Empty = Chatterbox's built-in voice.
+#SPECTRE_TTS_VOICE_REF=/root/boolian-voice.wav
 
 SPECTRE_PORT=8765
 # Optional shared secret; then open the page with ?token=...
@@ -117,7 +123,40 @@ cmd_selftest() {
   load_env
   check_gpu
   cd "$SERVER"
-  exec "$PY" "$ROOT/scripts/selftest_gpu.py"
+  exec "$PY" "$ROOT/scripts/selftest_gpu.py" "$@"
+}
+
+# Chatterbox pins torch 2.6 / transformers 5.2, which replaces the versions Kokoro and Whisper were set up with.
+# Keep a copy of the working venv so undo-chatterbox is instant if anything breaks.
+BACKUP="$SERVER/.venv-before-chatterbox"
+
+cmd_add_chatterbox() {
+  [ -x "$PY" ] || die "run '$0 setup' first"
+  export PATH="$HOME/.local/bin:$PATH"
+  if [ ! -d "$BACKUP" ]; then
+    log "Backing up the current environment to $BACKUP"
+    cp -a "$SERVER/.venv" "$BACKUP"
+  fi
+  log "Installing Chatterbox-Turbo (downgrades torch to 2.6; a few GB)"
+  cd "$SERVER"
+  uv pip install --python "$PY" -e '.[gpu,kokoro,chatterbox,dev]'
+  "$PY" - <<'EOF'
+import ctranslate2, torch
+from chatterbox.tts_turbo import ChatterboxTurboTTS  # noqa: F401
+print(f"  torch {torch.__version__} (CUDA {torch.version.cuda}) gpu available: {torch.cuda.is_available()}")
+print(f"  ctranslate2 {ctranslate2.__version__} cuda devices: {ctranslate2.get_cuda_device_count()}")
+EOF
+  log "Done. Next: $0 selftest --compare   (then set SPECTRE_TTS_BACKEND=chatterbox in spectre.env to use it)"
+}
+
+cmd_undo_chatterbox() {
+  [ -d "$BACKUP" ] || die "no backup at $BACKUP: add-chatterbox was never run"
+  log "Restoring the environment from before add-chatterbox"
+  rm -rf "$SERVER/.venv"
+  mv "$BACKUP" "$SERVER/.venv"
+  grep -q '^SPECTRE_TTS_BACKEND=chatterbox' "$ENV_FILE" 2>/dev/null \
+    && warn "spectre.env still says SPECTRE_TTS_BACKEND=chatterbox: set it back to kokoro-local"
+  log "Done. Restart the server (systemctl restart spectre)"
 }
 
 cmd_run() {
@@ -154,8 +193,10 @@ EOF
 
 case "${1:-}" in
   setup) cmd_setup ;;
-  selftest) cmd_selftest ;;
+  selftest) shift; cmd_selftest "$@" ;;
+  add-chatterbox) cmd_add_chatterbox ;;
+  undo-chatterbox) cmd_undo_chatterbox ;;
   run) cmd_run ;;
   service) cmd_service ;;
-  *) sed -n '2,10p' "$0"; exit 1 ;;
+  *) sed -n '2,12p' "$0"; exit 1 ;;
 esac

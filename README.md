@@ -52,6 +52,11 @@ Two containers with the GPU passed through, each with a clone of this repo:
 - `selftest` has Kokoro say a line, Whisper transcribe it back, and the LLM answer a prompt.
   It reports timings and VRAM, and tells you exactly which part failed.
 - `service` installs a systemd unit so it starts with the container (`journalctl -fu spectre`).
+- **Optional Chatterbox-Turbo voice** (more natural; can clone a 10 s+ voice clip; performs `[laugh]`, `[chuckle]`,
+  `[sigh]`, `[gasp]` and `[whispering]`, which the LLM is then told it may use). `add-chatterbox` installs it after backing
+  up the working environment, `selftest --compare` times it against Kokoro and saves WAVs to `/tmp`, and
+  `undo-chatterbox` restores the backup. To use it, set `SPECTRE_TTS_BACKEND=chatterbox` (and optionally
+  `SPECTRE_TTS_VOICE_REF`) in `spectre.env`. Each sentence is generated whole, so his replies start a little later.
 
 On the Mac, open `http://localhost:5173/?server=ws://SPECTRE_CONTAINER_IP:8765/ws`.
 
