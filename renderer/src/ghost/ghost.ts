@@ -386,6 +386,10 @@ export class Ghost {
   get dragAmount() {
     return this.drag;
   }
+  /** The big move in progress (spin, hide, peek), if any. */
+  get currentAction(): "spin" | "hide" | "peek" | null {
+    return this.action?.kind ?? null;
+  }
   get wispList(): readonly Wisp[] {
     return this.wisps;
   }
