@@ -236,11 +236,12 @@ def profile(model, label: str, graph: bool) -> None:
 
 @torch.inference_mode()
 def decoder_profile(model) -> None:
-    """Where S3Gen (speech tokens -> waveform) spends its ~230 ms per sentence."""
+    """The audio decoder (S3Gen: speech tokens -> waveform), as before and with recorded flow graphs."""
     from chatterbox.models.s3gen.const import S3GEN_SIL
     from chatterbox.tts_turbo import punc_norm
 
     s3, ref = model.s3gen, model.conds.gen
+    flow = chatterbox_fast.FlowGraphs.install(model)
     sil = torch.full((3,), S3GEN_SIL, device=model.device)
     tokens = []
     for line in LINES:
@@ -248,14 +249,33 @@ def decoder_profile(model) -> None:
         t = chatterbox_fast.speech_tokens(model.t3, model.conds.t3, text)
         tokens.append(torch.cat([t[t < chatterbox_fast.OOV_FROM], sil]))
 
-    def decode(toks, ref_dict=ref):
-        return s3.inference(speech_tokens=toks, ref_dict=ref_dict, n_cfm_timesteps=2)
+    def decode(toks, seed=None):
+        if seed is not None:
+            torch.manual_seed(seed)
+        return s3.inference(speech_tokens=toks, ref_dict=ref, n_cfm_timesteps=2)[0]
 
-    # 1. Each stage, timed with the GPU synchronised either side.
+    # 1. Same tokens and random seed, with and without the graphs: the audio must match.
+    print("  same tokens and seed, with vs without flow graphs:")
+    ok = True
+    for toks in tokens:
+        flow.enabled = False
+        a = decode(toks, seed=7)
+        flow.enabled = True
+        b = decode(toks, seed=7)
+        diff = float((a - b).abs().max())
+        peak = float(a.abs().max())
+        ok &= a.shape == b.shape and diff < 1e-3 * max(peak, 1e-3)
+        print(f"    {a.shape[-1] / model.sr:4.1f}s: largest sample difference {diff:.2e} (peak {peak:.2f})")
+    if not ok:
+        print("  FAILED: the flow graphs change the audio; not timing them")
+        return
+
+    # 2. Each stage, timed with the GPU synchronised either side, without and with the graphs.
     times: dict[str, float] = defaultdict(float)
     patched = []
 
     def time_method(obj, name, key):
+        had_own = name in vars(obj)  # e.g. the estimator's forward, already pointed at FlowGraphs
         orig = getattr(obj, name)
 
         def wrapper(*a, **k):
@@ -267,59 +287,48 @@ def decoder_profile(model) -> None:
             return r
 
         setattr(obj, name, wrapper)
-        patched.append((obj, name))
+        patched.append((obj, name, orig if had_own else None))
 
     time_method(s3.flow.encoder, "forward", "encoder")
     time_method(s3.flow.decoder.estimator, "forward", "flow steps")
     time_method(s3.mel2wav, "inference", "vocoder")
-    prompt_s = ref["prompt_token"].shape[1] / 25
-    print(f"  reference clip: {prompt_s:.1f}s ({ref['prompt_token'].shape[1]} tokens) is re-processed every sentence")
-    for toks in tokens:
-        decode(toks)  # warm-up for this length
-        times.clear()
-        torch.cuda.synchronize()
-        t = time.perf_counter()
-        decode(toks)
-        torch.cuda.synchronize()
-        total = time.perf_counter() - t
-        other = total - sum(times.values())
-        print(f"  {len(toks) / 25:4.1f}s of speech: total {total * 1000:4.0f} ms = encoder {times['encoder'] * 1000:4.0f}"
-              f" + flow steps (2) {times['flow steps'] * 1000:4.0f} + vocoder {times['vocoder'] * 1000:4.0f}"
-              f" + other {other * 1000:4.0f}")
-    for obj, name in patched:
-        delattr(obj, name)
+    for enabled in (False, True):
+        flow.enabled = enabled
+        label = "flow graphs" if enabled else "as before  "
+        for toks in tokens:
+            decode(toks)  # warm-up for this length
+            times.clear()
+            torch.cuda.synchronize()
+            t = time.perf_counter()
+            decode(toks)
+            torch.cuda.synchronize()
+            total = time.perf_counter() - t
+            other = total - sum(times.values())
+            print(f"  {label}: {len(toks) / 25:4.1f}s of speech: total {total * 1000:4.0f} ms = encoder "
+                  f"{times['encoder'] * 1000:3.0f} + flow steps (2) {times['flow steps'] * 1000:3.0f} + vocoder "
+                  f"{times['vocoder'] * 1000:3.0f} + other {other * 1000:3.0f}")
+    for obj, name, orig in patched:
+        if orig is None:
+            delattr(obj, name)
+        else:
+            setattr(obj, name, orig)
 
-    # 2. How much of that the GPU is actually busy, for the shortest sentence.
+    # 3. How much of the wall time the GPU is actually busy, for the shortest sentence.
     from torch.profiler import ProfilerActivity, profile
 
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-        torch.cuda.synchronize()
-        t = time.perf_counter()
-        decode(tokens[0])
-        torch.cuda.synchronize()
-        wall = time.perf_counter() - t
-    kernels = [e for e in prof.events() if e.device_type.name == "CUDA"]
-    busy_us = sum(e.time_range.elapsed_us() for e in kernels)  # one stream, so kernels don't overlap
-    print(f"  shortest sentence under the profiler: {wall * 1000:.0f} ms wall, GPU kernels busy {busy_us / 1000:.0f} ms "
-          f"across {len(kernels)} launches")
-
-    # 3. Cost against reference length (timing only: a shorter reference changes the voice conditioning).
-    n = ref["prompt_token"].shape[1]
-    for frac in (1.0, 0.5, 0.25):
-        k = int(n * frac)
-        d = dict(ref)
-        d["prompt_token"] = ref["prompt_token"][:, :k]
-        d["prompt_token_len"] = torch.tensor([k], device=model.device)
-        d["prompt_feat"] = ref["prompt_feat"][:, : 2 * k]
-        if ref.get("prompt_feat_len") is not None:
-            d["prompt_feat_len"] = torch.tensor([2 * k], device=model.device)
-        decode(tokens[0], d)
-        torch.cuda.synchronize()
-        t = time.perf_counter()
-        for _ in range(3):
-            decode(tokens[0], d)
-        torch.cuda.synchronize()
-        print(f"  reference trimmed to {k / 25:4.1f}s: {(time.perf_counter() - t) / 3 * 1000:4.0f} ms for the shortest sentence")
+    for enabled in (False, True):
+        flow.enabled = enabled
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            torch.cuda.synchronize()
+            t = time.perf_counter()
+            decode(tokens[0])
+            torch.cuda.synchronize()
+            wall = time.perf_counter() - t
+        kernels = [e for e in prof.events() if e.device_type.name == "CUDA"]
+        busy_us = sum(e.time_range.elapsed_us() for e in kernels)  # one stream, so kernels don't overlap
+        print(f"  {'flow graphs' if enabled else 'as before  '} under the profiler: {wall * 1000:.0f} ms wall, "
+              f"GPU kernels busy {busy_us / 1000:.0f} ms across {len(kernels)} launches")
+    flow.enabled = True
 
 
 def original(model, text):

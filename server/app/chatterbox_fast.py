@@ -13,11 +13,18 @@ GPU kernels one by one, not GPU work. So:
 - sampling works on the top-k slice, instead of sorting the whole vocabulary every step;
 - the stop token is checked every few steps, so the CPU doesn't wait on the GPU after every token.
 
+The audio decoder (S3Gen) has the same problem: its two flow-matching steps were ~94 ms of a
+~130 ms decode, with the GPU busy for under a third of it (~5,500 kernel launches per sentence).
+FlowGraphs records the flow network as CUDA graphs for padded lengths. Padding is exact for this
+network: causal convolutions, per-frame LayerNorm, no resampling along time (one channel level),
+and attention that masks padded frames out completely.
+
 (bf16 was tried: no faster, and audibly worse, so everything stays in fp32.)
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 import torch
@@ -32,6 +39,8 @@ OOV_FROM = 6561  # speech tokens at or above this (start/stop) aren't audio, as 
 SPANS = (512, 640, 768, 896, 1024, 1280, 1536)
 
 _graph_broken = False  # set if capture ever fails; we then fall back to the plain loop
+FLOW_STEP = 64  # flow graphs are recorded for lengths (mel frames) in steps of this
+FLOW_MAX_SPEECH_S = 15  # sentences up to this long (plus the reference clip) get a recorded graph
 
 
 def prepare(model) -> None:
@@ -48,6 +57,11 @@ def prepare(model) -> None:
         except Exception:
             log.exception("couldn't capture CUDA graphs; using the plain loop")
             _graph_broken = True
+        try:
+            with torch.inference_mode():
+                FlowGraphs.install(model)
+        except Exception:
+            log.exception("couldn't capture the audio decoder's CUDA graphs; it runs as before")
 
 
 def watermarker_to(model, device) -> None:
@@ -148,9 +162,97 @@ class GraphDecoder:
                 self._step(span)
         torch.cuda.current_stream().wait_stream(s)
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
+        with torch.cuda.graph(graph, capture_error_mode="thread_local"):  # Whisper may load in another thread
             logits = self._step(span)
         self.graphs[span] = (graph, logits)
+
+
+@contextlib.contextmanager
+def _masks_without_sync():
+    """S3Gen's add_optional_chunk_mask ends with a `.item()` check that would break graph capture.
+    With no chunking (this model's configuration) it returns its input mask, and the check can't fire
+    for masks with any real frame, so while recording, use a version that just returns the mask."""
+    import chatterbox.models.s3gen.decoder as dec
+
+    orig = dec.add_optional_chunk_mask
+
+    def no_sync(xs, masks, use_dynamic_chunk, use_dynamic_left_chunk, decoding_chunk_size, static_chunk_size,
+                *rest, **kw):
+        if use_dynamic_chunk or static_chunk_size > 0:
+            raise RuntimeError("chunked masks can't be recorded")
+        return masks
+
+    dec.add_optional_chunk_mask = no_sync
+    try:
+        yield
+    finally:
+        dec.add_optional_chunk_mask = orig
+
+
+class FlowGraphs:
+    """S3Gen's flow-matching network (the 'estimator') as CUDA graphs over padded lengths."""
+
+    def __init__(self, estimator, lengths):
+        self.est = estimator
+        self.eager = estimator.forward  # the original bound method
+        self.enabled = True
+        self.pool = torch.cuda.graph_pool_handle()  # shared: graphs never run at once, outputs are copied out
+        self.graphs: dict[int, tuple] = {}
+        for length in lengths:
+            self._capture(length)
+
+    @classmethod
+    def install(cls, model) -> FlowGraphs:
+        est = model.s3gen.flow.decoder.estimator
+        if isinstance(getattr(est, "_boolian_flow", None), FlowGraphs):
+            return est._boolian_flow
+        prompt = model.conds.gen["prompt_feat"].shape[1]  # mel frames of the reference clip
+        first = -(-(prompt + 20) // FLOW_STEP) * FLOW_STEP
+        last = -(-(prompt + FLOW_MAX_SPEECH_S * 50) // FLOW_STEP) * FLOW_STEP  # 50 mel frames per second
+        flow = cls(est, range(first, last + 1, FLOW_STEP))
+        est._boolian_flow = flow
+        est.forward = flow.forward
+        log.info("audio decoder captured as CUDA graphs for %d-%d mel frames", first, last)
+        return flow
+
+    def _capture(self, length: int) -> None:
+        dev, dt = self.est.final_proj.weight.device, self.est.dtype
+        buf = {
+            "x": torch.zeros(1, 80, length, device=dev, dtype=dt),
+            "mask": torch.ones(1, 1, length, device=dev, dtype=dt),
+            "mu": torch.zeros(1, 80, length, device=dev, dtype=dt),
+            "t": torch.zeros(1, device=dev, dtype=dt),
+            "spks": torch.zeros(1, 80, device=dev, dtype=dt),
+            "cond": torch.zeros(1, 80, length, device=dev, dtype=dt),
+            "r": torch.zeros(1, device=dev, dtype=dt),
+        }
+        with _masks_without_sync():
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(2):
+                    self.eager(**buf)
+            torch.cuda.current_stream().wait_stream(s)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, pool=self.pool, capture_error_mode="thread_local"):
+                out = self.eager(**buf)
+        self.graphs[length] = (graph, buf, out)
+
+    def forward(self, x, mask, mu, t, spks=None, cond=None, r=None):
+        n = x.shape[-1]
+        length = -(-n // FLOW_STEP) * FLOW_STEP
+        if (not self.enabled or x.shape[0] != 1 or spks is None or cond is None or r is None
+                or length not in self.graphs):
+            return self.eager(x, mask=mask, mu=mu, t=t, spks=spks, cond=cond, r=r)
+        graph, buf, out = self.graphs[length]
+        for name, value in (("x", x), ("mask", mask), ("mu", mu), ("cond", cond)):
+            buf[name][..., :n].copy_(value)
+            buf[name][..., n:].zero_()  # padded frames: masked out, and zero so nothing odd can leak
+        buf["t"].copy_(t.reshape(1))
+        buf["r"].copy_(r.reshape(1))
+        buf["spks"].copy_(spks)
+        graph.replay()
+        return out[..., :n].clone()
 
 
 def _decoder(t3) -> GraphDecoder:
