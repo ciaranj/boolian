@@ -39,6 +39,8 @@
 #define MIC_GAIN 16.0f
 
 #define HEADER_BYTES 16
+// The AM312 holds its output high for ~2 s per trigger, so anything that doesn't last this many 50 ms reads is noise.
+#define PIR_STABLE_READS 6
 
 static const char *TAG = "spectre-mic";
 
@@ -64,7 +66,8 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "Wi-Fi lost; reconnecting");
+        wifi_event_sta_disconnected_t *e = data;
+        ESP_LOGW(TAG, "Wi-Fi lost (reason %d, rssi %d); reconnecting", e->reason, e->rssi);
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = data;
@@ -85,6 +88,9 @@ static void wifi_start(void) {
     strlcpy((char *)wc.sta.password, WIFI_PASSWORD, sizeof(wc.sta.password));
     wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;  // pick the strongest access point, on either band
     wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    wc.sta.failure_retry_cnt = 3;  // then try the next node
+    wc.sta.mbo_enabled = 1;        // and with it 802.11k/v: mesh nodes can hand us between them
+    wc.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -220,10 +226,15 @@ void app_main(void) {
 
     // Watch the PIR, and once a second print the diagnostics (sending them to the server every 5 s).
     int motion = -1;
+    int last_raw = 0, same = 0, flips = 0;  // flips: raw changes in the last second, for spotting a noisy PIR wire
     int tick = 0;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(50));
-        int now = gpio_get_level(PIN_PIR);
+        int raw = gpio_get_level(PIN_PIR);
+        if (raw != last_raw) flips++, same = 0;
+        else if (same < PIR_STABLE_READS) same++;
+        last_raw = raw;
+        int now = same >= PIR_STABLE_READS ? raw : (motion == -1 ? 0 : motion);
         if (say_hello) {
             say_hello = false;
             send_text("{\"v\":1,\"type\":\"hello\",\"role\":\"mic\",\"device\":\"" DEVICE_NAME "\",\"sample_rate\":16000}");
@@ -242,9 +253,10 @@ void app_main(void) {
         int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
         uint32_t heap = esp_get_free_heap_size();
         ESP_LOGI(TAG, "level %.1f dBFS peak %.1f | clips %lu sent %lu dropped %lu queued %u | %s rssi %d reconnects %lu "
-                      "heap %lu | pir %d",
+                      "heap %lu | pir %d (%d raw flips)",
                  to_db(rms), to_db(peak), clips, sent, dropped, (unsigned)uxQueueMessagesWaiting(frames),
-                 ws_up ? "online" : "OFFLINE", rssi, reconnects, heap, motion);
+                 ws_up ? "online" : "OFFLINE", rssi, reconnects, heap, motion, flips);
+        flips = 0;
         if (tick % 100 == 0) {
             char json[200];
             snprintf(json, sizeof(json),

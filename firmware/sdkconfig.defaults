@@ -2,3 +2,11 @@ CONFIG_IDF_TARGET="esp32c5"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# Mesh Wi-Fi (as in HeyWillow/willow): let the nodes steer us (802.11k/v, MBO), and don't keep the last node and
+# channel in flash, or after a reboot it goes straight back to a node that may not be the right one any more.
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
+CONFIG_ESP_WIFI_MBO_SUPPORT=y
+CONFIG_ESP_WIFI_SCAN_CACHE=y
+# CONFIG_ESP_WIFI_NVS_ENABLED is not set
+# CONFIG_ESP_PHY_CALIBRATION_AND_DATA_STORAGE is not set
+CONFIG_ESP_PHY_RF_CAL_FULL=y
