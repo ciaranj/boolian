@@ -414,3 +414,17 @@ async def test_a_reply_encouraging_danger_is_swapped_before_it_is_spoken():
     said = rec.json[-1]["text"]
     assert "Sneak off" not in said
     assert any(said.endswith(persona.clean_for_speech(line[2])) for line in persona.UNSAFE_LINES), said
+
+
+async def test_his_riddles_stay_the_same_for_a_group_and_change_for_the_next():
+    convo, _rec = make()
+    first = convo._build_messages()[0]["content"]
+    await convo.handle_json({"type": "text", "text": "hello"})
+    await finish(convo)
+    assert convo.jokes in convo._build_messages()[0]["content"] and convo.jokes in first
+    jokes = convo.jokes
+    for _ in range(5):  # the odd one could repeat by chance
+        await convo.reset("operator")
+        if convo.jokes != jokes:
+            break
+    assert convo.jokes != jokes

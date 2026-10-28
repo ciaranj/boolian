@@ -89,7 +89,7 @@ def load_config() -> Config:
         tts_stream=_env("TTS_STREAM", "0") == "1",  # chatterbox only, needs tts_fast: send sentences in pieces
         tts_sample_rate=int(_env("TTS_SAMPLE_RATE", "24000")),
         ghost_name=_env("GHOST_NAME", "Boolian"),
-        history_turns=int(_env("HISTORY_TURNS", "25")),  # ~70 tokens each; with the ~1.4k-token prompt, must fit the 4k context
+        history_turns=int(_env("HISTORY_TURNS", "25")),  # ~70 tokens each; with the ~1.6k-token prompt, must fit the 4k context
         idle_reset_s=float(_env("IDLE_RESET_S", "40")),  # only used with nudging off
         nudge_s=float(_env("NUDGE_S", "12")),  # quiet seconds after he speaks before he prompts again; 0 = never
         max_nudges=int(_env("MAX_NUDGES", "2")),

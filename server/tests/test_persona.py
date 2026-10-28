@@ -102,7 +102,8 @@ def test_date_and_rough_time_of_day():
     p = system_prompt("Boolian", now=datetime(2026, 10, 31, 18, 47))
     assert p.endswith("Today is Saturday 31 October 2026, Halloween. It is early evening.")
     # Same prompt all through each period, so the LLM's cached prefix survives.
-    assert system_prompt("Boolian", now=datetime(2026, 10, 31, 19, 1)) == system_prompt("Boolian", now=datetime(2026, 10, 31, 20, 59))
+    assert (system_prompt("Boolian", now=datetime(2026, 10, 31, 19, 1), jokes="")
+            == system_prompt("Boolian", now=datetime(2026, 10, 31, 20, 59), jokes=""))
     assert "bedtime" in system_prompt("Boolian", now=datetime(2026, 10, 31, 21, 30))
     assert system_prompt("Boolian", now=datetime(2026, 10, 27, 20, 0)).endswith("Today is Tuesday 27 October 2026. It is evening.")
 
@@ -232,3 +233,13 @@ def test_his_reply_never_encourages_danger():
                  "Don't hide from your grown-ups, they'd be so worried!", "Stay right next to your grown-ups tonight!",
                  "A pumpkin! What a brilliant costume.", "I'd float away if I could!", "Boo! Did I scare you?"]:
         assert not encourages_danger(fine), fine
+
+
+def test_each_group_of_visitors_gets_a_handful_of_riddles_and_jokes_at_the_end():
+    from app.persona import JOKES, RIDDLES, repertoire, system_prompt
+
+    jokes = repertoire()
+    assert sum(q in jokes for q, _ in RIDDLES) == 4 and sum(j in jokes for j in JOKES) == 3
+    p = system_prompt("Boolian", jokes=jokes)
+    assert p.endswith(jokes)  # last but for the time, so the rest of the prompt stays cached between groups
+    assert len({repertoire() for _ in range(20)}) > 1

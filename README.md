@@ -231,7 +231,7 @@ on as before.
 - **Attract mode** (on by default, **A** toggles it): while nobody is talking to him, he calls out every 30–60 s to
   draw people over ("I've got riddles for anyone brave enough!", the odd fart). If someone answers, he remembers what
   he called out. `SPECTRE_ATTRACT_S` sets how often (0 = never).
-- He knows a handful of Halloween riddles and a guess-the-creature game, and offers them now and then.
+- He knows 22 Halloween riddles and 8 jokes and knock-knocks (`RIDDLES` and `JOKES` in `persona.py`), and a guess-the-creature game, and offers them now and then. Each group of visitors gets a random handful of them, so he doesn't keep telling the same one.
 - **G** greets the group, which helps because kids don't know they can talk to him. **R** forgets the visitor.
   If nobody answers him, he asks if they're still there twice (12 s apart), then says goodbye and forgets them.
 - **1–9** play puppet lines (the raspberry and fart lines below them are click-only), and the "Boolian says" box

@@ -51,6 +51,7 @@ class Conversation:
         self.next_attract = 0.0
         self.last_attract: tuple[float, str] | None = None  # when, and what he called out
         self.last_motion_greet = -1e9
+        self.jokes = persona.repertoire()  # the riddles and jokes he knows for these visitors
         self.wants_device_mic = False  # relay the ESP32's microphone to this browser
 
         self.listening = False
@@ -194,6 +195,7 @@ class Conversation:
         self.nudges = 0
         self._log("reset", reason=reason)
         self.convo = new_id()
+        self.jokes = persona.repertoire()
         await self._send_json({"v": 1, "type": "session_reset", "reason": reason})
         log.info("session reset (%s)", reason)
 
@@ -368,7 +370,8 @@ class Conversation:
                 turns.append(dict(m))
         if turns and turns[0]["role"] == "assistant":
             turns.insert(0, {"role": "user", "content": "(Some visitors float up to you.)"})
-        return [{"role": "system", "content": persona.system_prompt(self.cfg.ghost_name, sounds=self.tts.sound_tags, now=datetime.now())}, *turns]
+        prompt = persona.system_prompt(self.cfg.ghost_name, sounds=self.tts.sound_tags, now=datetime.now(), jokes=self.jokes)
+        return [{"role": "system", "content": prompt}, *turns]
 
     async def _produce(self, gen: int, timing: TurnTiming, messages: list[dict], queue: asyncio.Queue, reply: dict) -> None:
         parser = ReplyParser(eager_first=self.tts.whole_sentences)
