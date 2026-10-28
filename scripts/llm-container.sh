@@ -97,8 +97,13 @@ cmd_run() {
   # No thinking (a reasoning preamble would cost seconds per reply) and no vision projector (wasted VRAM).
   # --swa-full: Gemma's sliding-window cache otherwise makes reusing the cached system prompt slower
   # than reprocessing it (~400 ms per turn); the full cache fits at 4k context (8k runs out of VRAM beside the spectre container).
+  # --cache-ram 0: newer builds keep a copy of each finished conversation's cache in system RAM (up to 8 GB), which
+  # with --swa-full is the whole 4k cache per visitor group; it filled the container's memory over an evening and
+  # slowed everything to a crawl. One conversation at a time reuses the live cache anyway. (Older builds lack the flag.)
+  local cache_args=()
+  case "$("$bin" --help 2>&1)" in *--cache-ram*) cache_args=(--cache-ram 0) ;; esac
   exec "$bin" "${model_args[@]}" --host 0.0.0.0 --port "${LLM_PORT:-8080}" \
-    -ngl 99 -c "${LLM_CTX:-4096}" --parallel 1 --jinja --no-mmproj --swa-full \
+    -ngl 99 -c "${LLM_CTX:-4096}" --parallel 1 --jinja --no-mmproj --swa-full "${cache_args[@]}" \
     --chat-template-kwargs '{"enable_thinking":false}'
 }
 
