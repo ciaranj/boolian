@@ -14,14 +14,14 @@
 part = "both"; // box | lid | both
 
 /* [Boards: MEASURE] */
-board_l = 64;      // ESP32-C5 DevKitC-1, USB end to antenna end
+board_l = 54;      // ESP32-C5 DevKitC-1, USB end to antenna end
 board_w = 26;      // across the pin headers
 board_t = 1.6;     // PCB thickness
-usb_slot_w = 22;   // both USB-C ports, side by side on the short edge
-usb_slot_h = 9;    // room for the plug's moulding, not just the socket
-usb_above_pcb = 3.2; // height of the socket's centre above the PCB's top face
+usb_slot_w = 23;   // both USB-C ports, side by side on the short edge
+usb_slot_h = 6.8;    // room for the plug's moulding, not just the socket
+usb_above_pcb = 2.5; // height of the socket's centre above the PCB's top face
 mic_pcb_d = 14.2;  // round INMP441 breakout
-pir_dome_d = 10.2; // AM312 lens dome
+pir_dome_d = 12.2; // AM312 lens dome
 
 /* [Box] */
 wall = 2.2;

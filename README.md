@@ -119,8 +119,11 @@ All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
 
 ## The ESP32 microphone and motion sensor
 
-An ESP32-C5 with an INMP441 microphone and an AM312 PIR, on Wi-Fi. It streams audio to the server, and a person
-walking up makes him greet them. The firmware is in `firmware/` (ESP-IDF 6.1).
+An ESP32-C5 with an INMP441 microphone and an AM312 PIR, on Wi-Fi, so the mic can sit near the visitors instead of
+the laptop. It streams audio to the server's `/mic` socket, and a person walking up makes him greet them. The
+firmware is in `firmware/` (ESP-IDF 6.1), and a 3D-printable case is in `firmware/enclosure/`.
+
+### Wiring
 
 | INMP441 | ESP32-C5 | | AM312 | ESP32-C5 |
 |---|---|---|---|---|
@@ -131,24 +134,68 @@ walking up makes him greet them. The firmware is in `firmware/` (ESP-IDF 6.1).
 | SD | GPIO6 | | | |
 | L/R | GND | | | |
 
-Both run from 3.3 V; don't power the INMP441 from 5 V.
+- Both run from 3.3 V; don't power the INMP441 from 5 V.
+- Female-to-female jumpers straight onto the pins are enough; tape or a dab of hot glue stops them working loose.
+- Link the mic's L/R to its own GND pin, which saves a wire. Use the board's spare 3V3 and GND pins before splicing;
+  if you must split one, use a Wago lever connector or solder and heat-shrink, not a strip of breadboard.
+- Keep the mic's five wires together in one loose bundle, under about 30 cm. Its clock runs at 1 MHz, and a spread-out
+  loop of wire picks up the Wi-Fi radio. The PIR's wire can be a metre or two and go its own way.
+
+### Setting it up
+
+1. Install [ESP-IDF 6.1](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c5/get-started/).
+2. `cp firmware/main/secrets.example.h firmware/main/secrets.h` and fill in the Wi-Fi name and password, the server
+   (`ws://SPECTRE_IP:8765/mic`, plus `?token=…` if `SPECTRE_AUTH_TOKEN` is set) and a name for the operator panel.
+   **`secrets.h` is gitignored; never commit it.** The build stops if it's missing.
+3. Build and flash. Either of the board's USB ports works: `/dev/cu.usbmodem…` is the C5's own USB,
+   `/dev/cu.wchusbserial…` the serial chip.
+   ```bash
+   cd firmware
+   source ~/.espressif/tools/activate_idf_v6.1.sh
+   idf.py -p /dev/cu.usbmodem… build flash monitor
+   ```
+   If it ever won't join Wi-Fi after changing networks, `idf.py -p … erase-flash flash` starts it fresh.
+
+**Mesh Wi-Fi.** Out of the box, ESP-IDF often fails to rejoin a mesh network after a reboot. The firmware uses the
+settings from [Willow](https://github.com/HeyWillow/willow): 802.11k/v and MBO so the nodes can steer it, three tries
+before the next node, and no Wi-Fi state kept in flash (`sdkconfig.defaults`, `wifi_start()` in `main.c`). The log
+names the access point it joins and the reason when it drops.
+
+### Checking it
+
+The serial monitor prints a line a second: level and peak in dBFS, clipping, frames sent and dropped, queue, Wi-Fi
+signal, reconnects, free memory, and the PIR state with its raw flips that second.
+
+- **Microphone.** Speech close to it should reach about −30 dBFS. If it barely moves, raise `MIC_GAIN` in `main.c`;
+  if it clips, lower it. To hear what it hears:
+  `server/.venv/bin/python scripts/listen_mic.py ws://SPECTRE_IP:8765/ws --seconds 10 && afplay esp32.wav`.
+  A faint hiss is the INMP441's own noise floor (about −60 dBFS), well below the room; Whisper and Silero ignore it.
+- **PIR.** Cover it with a mug (glass and plastic block body heat): it should say "motion stopped" and stay quiet.
+  Uncover it and wave: "motion seen", held about 2 s after you stop. Give it a minute after power-on to settle,
+  and expect it to keep firing while you sit in front of it. A stream of raw flips means a loose or noisy OUT wire;
+  the firmware ignores anything shorter than 300 ms.
+
+### The case
+
+`firmware/enclosure/enclosure.scad` is a parametric OpenSCAD box, about 79 × 64 × 44 mm, with a push-on lid. The PIR
+pokes through the front above a small sound hole, the USB cable comes out of the side, and there are screw tabs on the
+back. The board sits on ledges at each end so the jumpers can hang beneath it. **Measure your boards first**: the
+numbers marked `MEASURE` are typical sizes, not yours. Then:
 
 ```bash
-cd firmware
-cp main/secrets.example.h main/secrets.h   # Wi-Fi, the server's ws://SPECTRE_IP:8765/mic, a device name
-source ~/.espressif/tools/activate_idf_v6.1.sh
-idf.py build flash monitor                  # -p /dev/cu.wchusbserial… if it can't find the board
+cd firmware/enclosure
+openscad -D 'part="box"' -o box.stl enclosure.scad && openscad -D 'part="lid"' -o lid.stl enclosure.scad
 ```
 
-The serial monitor prints a line a second: level and peak in dBFS, clipping, frames sent and dropped, Wi-Fi signal,
-reconnects, free memory and the PIR state. Speech close to it should reach about −30 dBFS. If it barely moves,
-raise `MIC_GAIN` in `main.c`; if it clips, lower it.
+Print the box open side up and the lid flat side down, with no supports; PETG if it'll be outside. Glue the mic into
+the ring behind the sound hole, sound port facing out and unobstructed, and hot-glue the PIR in from inside.
+Place it 0.5–1 m from where visitors stand, as far from the speaker as you can, with the PIR looking down the path.
 
-To hear what it hears: `server/.venv/bin/python scripts/listen_mic.py ws://SPECTRE_IP:8765/ws --seconds 10 && afplay esp32.wav`.
-It records what the server relays, printing the level each second.
+### Using it
 
 In the operator panel, choose **ESP32 microphone (via the server)** under Microphone. The info line shows its name,
-Wi-Fi signal and dropped frames, and the log says when it connects, disconnects or sees motion.
+Wi-Fi signal and dropped frames, and the log says when it connects, disconnects or sees motion. Push-to-talk and
+auto-listen work just as with the laptop's mic.
 
 **Motion:** when the PIR sees someone and nobody is talking to him, he greets them, at most once a minute
 (`SPECTRE_MOTION_GREET_S`, 0 = never). Switching attract mode off (**A**) stops it too. The attract call-outs carry
@@ -171,7 +218,9 @@ on as before.
    each edge of the projector and stay put when you rescale or move the ghost.
 7. If you use Bluetooth speakers, raise **Speaker delay** until the mouth matches the sound. Set Reverb and the
    voice effects (Waver, Flanger, Echo, Shadow voice) on the real speaker; each costs a little clarity.
-8. Hold Space and say "hello". Check the log and latency readout.
+8. Plug in the ESP32 and choose **ESP32 microphone (via the server)** under Microphone; the log should say it's
+   connected. Walk up to it: "motion seen" appears in the log.
+9. Hold Space and say "hello". Check the log and latency readout.
 
 **Running**
 - **Hold Space** while a child talks, then release. This is the most reliable mode. Auto-listen (**V**) uses the

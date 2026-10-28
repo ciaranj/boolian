@@ -12,3 +12,6 @@ infra/models/
 spectre.env
 llm.env
 conversations/
+
+# ESP32 Wi-Fi password and server (firmware/.gitignore has it too)
+firmware/main/secrets.h
