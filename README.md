@@ -231,6 +231,8 @@ Wi-Fi signal and dropped frames, and the log says when it connects, disconnects 
 auto-listen work just as with the laptop's mic. If the server hears nothing from it for 5 s
 (`SPECTRE_MIC_IDLE_S`), it hangs up and shows it as disconnected, so a link that died without closing can't pass
 for a working one; the ESP32 reconnects by itself, and gives up on a dead link after 15 s without a pong.
+Every open page gets the ESP32's audio, so a laptop asleep with the page open used to stop all the others hearing
+it. Now a page that doesn't take a message within 2 s (`SPECTRE_SEND_DEADLINE_S`) is dropped; it reconnects when it wakes.
 
 **Motion:** when the PIR sees someone and nobody is talking to him, he greets them, at most once a minute
 (`SPECTRE_MOTION_GREET_S`, 0 = never). Switching attract mode off (**A**) stops it too. The attract call-outs carry

@@ -22,6 +22,7 @@ from .config import load_config
 from .llm import make_llm
 from .metrics import Metrics
 from .protocol import FrameError, parse_mic_frame
+from .sender import DeadlineSender
 from .session import Conversation
 from .convolog import ConversationLog
 from .stt import make_stt
@@ -39,6 +40,7 @@ convo_log = ConversationLog(cfg.conversation_log)
 presenters: set[Conversation] = set()
 mic_status: dict = {"connected": False}  # the ESP32, as last reported to the presenters
 current_mic: object | None = None  # only the latest ESP32 to connect is listened to
+closing: set[asyncio.Task] = set()  # hang-ups of stuck presenters, kept so they aren't garbage-collected
 
 
 @asynccontextmanager
@@ -82,15 +84,21 @@ async def presenter(ws: WebSocket):
         await ws.close(code=4401)
         return
     await ws.accept()
-    lock = asyncio.Lock()
+
+    def stuck() -> None:
+        # Asleep with the page open, most likely. Stop relaying to it, and hang up so a live one reconnects.
+        log.warning("presenter %s isn't taking messages: dropping it", ws.client)
+        presenters.discard(convo)
+        closing.add(task := asyncio.create_task(_close_quietly(ws)))
+        task.add_done_callback(closing.discard)
+
+    sender = DeadlineSender(cfg.send_deadline_s, stuck)
 
     async def send_json(msg: dict) -> None:
-        async with lock:
-            await ws.send_text(json.dumps(msg))
+        await sender(lambda: ws.send_text(json.dumps(msg)))
 
     async def send_bytes(data: bytes) -> None:
-        async with lock:
-            await ws.send_bytes(data)
+        await sender(lambda: ws.send_bytes(data))
 
     convo = Conversation(cfg, stt, llm, tts, metrics, send_json, send_bytes, convo_log)
     watchdog = asyncio.create_task(convo.idle_watchdog())
@@ -121,6 +129,11 @@ async def presenter(ws: WebSocket):
         with contextlib.suppress(Exception):
             await ws.close()
         log.info("presenter disconnected")
+
+
+async def _close_quietly(ws: WebSocket) -> None:
+    with contextlib.suppress(Exception):
+        await ws.close(code=1011)
 
 
 async def _to_presenters(fn) -> None:

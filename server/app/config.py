@@ -57,6 +57,7 @@ class Config:
     attract_s: float
     motion_greet_s: float
     mic_idle_s: float
+    send_deadline_s: float
     max_utterance_s: float
     static_dir: str
 
@@ -97,6 +98,7 @@ def load_config() -> Config:
         attract_s=float(_env("ATTRACT_S", "45")),  # with nobody to talk to, call out about this often (±40%); 0 = never  # "still there?" prompts before he gives up and forgets them
         motion_greet_s=float(_env("MOTION_GREET_S", "60")),  # PIR: greet newcomers at most this often; 0 = never
         mic_idle_s=float(_env("MIC_IDLE_S", "5")),  # ESP32: drop its connection after this long with nothing from it
+        send_deadline_s=float(_env("SEND_DEADLINE_S", "2")),  # a browser that takes longer than this for one send is dropped
         max_utterance_s=float(_env("MAX_UTTERANCE_S", "15")),
         static_dir=_env("STATIC_DIR", ""),
     )
