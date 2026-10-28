@@ -177,7 +177,9 @@ function startStage() {
         if (conv === "thinking") setConv("idle");
         break;
       case "alert": {
-        const text = `A child may need help. They said: “${String(e.text ?? "")}”`;
+        const why = e.reason === "running_off" ? "A child talked about running off from their grown-up"
+          : e.reason === "unsafe_plan" ? "A child talked about doing something unsafe" : "A child may need help";
+        const text = `${why}. They said: “${String(e.text ?? "")}”`;
         report({ s: "alert", text });
         log("err", text);
         break;

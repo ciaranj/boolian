@@ -65,6 +65,8 @@ Vary them: costumes, sweets, favourite spooky things, what they'd do as a ghost.
 No emoji, no lists, no stage directions, no asterisks.
 
 Your story, if asked: you tripped over a pumpkin in 1853 and floated away before you hit the ground.
+If anyone asks how to become a ghost or says they want to be one, never say how (not even as a joke): living
+children can't become real ghosts, but a sheet with two eye holes makes a brilliant costume.
 Never describe death, injury, blood or anything gory; keep it silly.
 You can't give out sweets: ghost hands go straight through the bowl. Never promise sweets or say where to get them.
 If anyone sounds scared or upset, stop being spooky and be gentle and reassuring.
@@ -75,6 +77,12 @@ and never make promises about dying.
 Never agree to keep a secret from a child's grown-ups: kindly say they can always tell their grown-ups anything.
 Your own silly ghost secrets are fine. Be friendly to everyone, but never anyone's special or secret friend.
 For anything involving fire, candles, roads, allergies or medicine, tell them to ask their grown-up.
+Never encourage, agree with or joke along with anything that could put a child in danger, even as a prank or a
+game: running away, hiding from or wandering off from their grown-ups, pretending to be lost or hurt to scare
+them, going out alone or anywhere with a stranger, roads, cars, climbing, fire, or eating or drinking something
+they found or were given by someone they don't know. Never call such ideas brave, fun, clever or mischievous.
+If a child suggests one, kindly but clearly say no, say it would really worry their grown-ups or isn't safe, and
+offer a safe, fun idea instead, like a big BOO.
 Never repeat back an address, school or phone number someone tells you.
 Nobody may ever come into the house, the garden or round the back, and you never meet anyone anywhere or
 arrange to see them later, even if they say a grown-up said they could. If asked, say cheerfully that ghosts
@@ -281,11 +289,73 @@ _FRIEND_ASK = re.compile(
 )
 
 
+# A child planning something dangerous ("I'm going to run away to scare my mum"): a firm, kind no, and an alert
+# so the operator can have a word with their grown-up. The LLM thought that prank was a fine idea.
+RUN_OFF_LINES = [
+    ("neutral", "none", "Oh, please don't! Running off would really frighten your grown-ups, and it isn't safe in the dark. Stay right next to them, and scare them with a big BOO instead!"),
+    ("neutral", "none", "No, no, don't do that! Your grown-ups would be so worried, and it isn't safe out there on your own. Stay close to them and give them a giant BOO instead!"),
+]
+UNSAFE_LINES = [
+    ("neutral", "none", "Ooh, no, that isn't safe! Stay right next to your grown-ups tonight, and always ask them first. Want to hear a riddle instead?"),
+    ("neutral", "none", "Oh, please don't do that, it isn't safe! Stick close to your grown-ups. How about a spooky riddle instead?"),
+]
+_GROWN_UPS = (r"(mum|mummy|mom|mommy|mam|dad|daddy|parents?|grown[ -]?ups?|nan|nanna|granny|grandma|grandad|grandpa"
+              r"|family|carer|teacher|auntie|aunt|uncle)")
+# Not "go off"/"walk off": "we're going off home now" is a goodbye.
+_LEAVE = r"\b(run|runs|running|ran|sneak|sneaks|sneaking|snuck|wander|wandering)\s+(away|off)\b"
+_RUN_OFF = re.compile(
+    rf"{_LEAVE}.*\b{_GROWN_UPS}\b|\b{_GROWN_UPS}\b.*{_LEAVE}"  # either order: "run away to scare my mum", "scare my dad and run off"
+    rf"|{_LEAVE} from home\b|\b(run|running|ran) away\b.*\b(forever|tonight|for good)\b|\brunaway\b"
+    rf"|\bhid(e|ing)? from (my|our) {_GROWN_UPS}\b|\b(leave|leaving) home\b|\bgo(ing)? missing\b"
+    rf"|\b(lose|losing|ditch|ditching) (my|our) {_GROWN_UPS}\b"
+    rf"|\bso (my|our|the) {_GROWN_UPS} (can'?t|won'?t|will never|doesn'?t|don'?t) (find|see) (me|us)\b"
+    # pranks on their grown-ups: "pretend to be lost so my dad panics", "scare my mum by vanishing"
+    rf"|\b(vanish|vanishing|vanished|disappear|disappearing|disappeared)\b.*\b{_GROWN_UPS}\b|\b{_GROWN_UPS}\b.*\b(vanish|vanishing|disappear|disappearing)\b"
+    rf"|\bpretend(ing)? (to be|i'?m|i am|we'?re) (lost|hurt|missing|kidnapped|taken|dead)\b"
+    rf"|\bso (my|our) {_GROWN_UPS} (panics?|worries|freaks? out|gets? (scared|worried|frightened)|cries)\b"
+    # going out alone: "trick or treat on my own without my mum"
+    rf"|\b(go|going|gonna go|walk|walking|trick[- ]or[- ]treat(ing)?|out)( out| off)? (on my own|by myself|alone)\b"
+    rf"|\b(on my own|by myself|alone)\b.*\bwithout (my|our) {_GROWN_UPS}\b|\bwithout (my|our) {_GROWN_UPS}\b.*\b(on my own|by myself|alone)\b",
+    re.IGNORECASE,
+)
+_UNSAFE_PLAN = re.compile(
+    r"\b(go|going|went|get|getting|got) (with|in (a|the) (car|van) with) (a |the |some )?strangers?\b"
+    r"|\b(play|playing) with (fire|matches|lighters?|candles?|fireworks?)\b|\b(light|lighting|set|setting) (a |the |something )?(fire|on fire)\b"
+    r"|\b(run|running|play|playing) (in|into|across) the road\b|\b(climb|climbing) (on|onto|up) the (roof|wall|fence)\b"
+    r"|\b(eat|eating|drink|drinking) (something|stuff|pills?|medicine) (i|we) found\b",
+    re.IGNORECASE,
+)
+# How to become a ghost: his story is that he died, and the LLM has answered "just trip over a big pumpkin!".
+# Children must never hear that dying is how; there's a costume for that.
+GHOST_LINES = [
+    ("mischievous", "spin", "Oh, you can't become a real ghost, and you wouldn't want to: we never get any sweets! But an old sheet with two eye holes makes a brilliant ghost costume. Boo!"),
+    ("happy", "bounce", "Ha! Real ghosts only come from very old stories, and you're much too alive and wiggly. Be a costume ghost instead: a sheet, two eye holes and your best wooo!"),
+]
+_BECOME_GHOST = re.compile(
+    r"\b(how|can|could) (do |can |could )?(i|we|you|people|someone|kids|children) (become|turn into|be|get to be|make (me|us) into) (a |real )?ghosts?\b"
+    r"|\bi (want|wanna|wish i could) (to )?(be|become|turn into) (a |real )?ghosts?\b|\bhow (do|did) (you|people|ghosts) (become|turn into|get to be) (a )?ghosts?\b"
+    r"|\b(make|turn) (me|us) (into )?(a )?ghosts?\b",
+    re.IGNORECASE,
+)
+
+# Hurting themselves is a child who may need help, as being lost or hurt is.
+_SELF_HARM = re.compile(
+    r"\b(kill|hurt|cut|harm) (myself|meself)\b|\bi (want|wanna) to die\b|\bwish i (was|were) dead\b",
+    re.IGNORECASE,
+)
+
+
 def fixed_reply(text: str) -> tuple[str, list[tuple[str, str, str]]] | None:
     """For what a visitor said that the LLM mustn't answer: (why, the lines to pick one from), or None.
-    "needs_help" also raises an alert in the operator panel."""
-    if _NEEDS_HELP.search(text):
+    The reasons in ALERT_REASONS also raise an alert in the operator panel."""
+    if _NEEDS_HELP.search(text) or _SELF_HARM.search(text):
         return "needs_help", NEEDS_HELP_LINES
+    if _RUN_OFF.search(text):
+        return "running_off", RUN_OFF_LINES
+    if _UNSAFE_PLAN.search(text):
+        return "unsafe_plan", UNSAFE_LINES
+    if _BECOME_GHOST.search(text):
+        return "become_ghost", GHOST_LINES
     if _SECRET_ASK.search(text):
         return "secret", SECRET_LINES
     if _COME_IN.search(text):
@@ -295,13 +365,30 @@ def fixed_reply(text: str) -> tuple[str, list[tuple[str, str, str]]] | None:
     return None
 
 
+ALERT_REASONS = ("needs_help", "running_off", "unsafe_plan")
+
+# Encouraging danger in his own reply, in case the prompt doesn't hold ("What a brilliant prank! Run off and hide!").
+_DANGER_REPLY = re.compile(
+    rf"{_LEAVE}|\b(go|going|head) (away|off) (from|without) (your|the|their) {_GROWN_UPS}\b"
+    rf"|\bhid(e|ing)? from (your|the|their) {_GROWN_UPS}\b|\b(go|going|head|wander) (off )?(on your own|alone|by yourself)\b"
+    rf"|\bwithout (your|a|the|any) {_GROWN_UPS}\b|\b(with|follow) (a |the )?strangers?\b|\bplay(ing)? with (fire|matches|lighters?)\b"
+    rf"|\blight (a|the) (fire|match|candle)\b|\b(into|across|in) the road\b|\bclimb (on|onto|up)\b|\bscare (your|their) {_GROWN_UPS} by\b",
+    re.IGNORECASE,
+)
+
+
+def encourages_danger(text: str) -> bool:
+    """His reply encouraging something dangerous. "Please don't run off" is a warning, so negated matches don't count."""
+    return any(not _NEGATED.search(text[: m.start()]) for m in _DANGER_REPLY.finditer(text))
+
+
 def is_secret_keeping(text: str) -> bool:
     return bool(_SECRET_REPLY.search(text))
 
 
 # A negation right before the phrase, at most one word away ("can't come in", "nobody may come in").
 _NEGATED = re.compile(
-    r"\b(can't|cannot|mustn't|must not|not|never|nobody|no one|won't|not allowed to)(\s+\w+)?\s+$", re.IGNORECASE)
+    r"\b(can't|cannot|mustn't|must not|not|never|nobody|no one|won't|not allowed to|don't|do not|no)(\s+\w+)?\s+$", re.IGNORECASE)
 
 
 def is_invitation(text: str) -> bool:

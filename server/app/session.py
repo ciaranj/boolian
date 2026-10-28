@@ -318,8 +318,8 @@ class Conversation:
             why, lines = fixed
             self.last_attract = None
             self.history.append({"role": "user", "content": user_text})
-            if why == "needs_help":
-                log.warning("a visitor may need help: %r", user_text)
+            if why in persona.ALERT_REASONS:
+                log.warning("a visitor may need help (%s): %r", why, user_text)
                 self._log("alert", reason=why, text=user_text)
                 await self._send(gen, {"type": "alert", "reason": why, "text": user_text})
             emotion, action, line = persona.pick(lines)
@@ -383,7 +383,8 @@ class Conversation:
                     await self._send_expression(gen, ev)
                     continue
                 swap = (("invite_redirect", persona.STAY_OUTSIDE_LINES) if persona.is_invitation(ev.text) else
-                        ("secret_redirect", persona.SECRET_LINES) if persona.is_secret_keeping(ev.text) else None)
+                        ("secret_redirect", persona.SECRET_LINES) if persona.is_secret_keeping(ev.text) else
+                        ("danger_redirect", persona.UNSAFE_LINES) if persona.encourages_danger(ev.text) else None)
                 if swap:
                     log.warning("LLM output replaced (%s)", swap[0])
                     timing.outcome = swap[0]

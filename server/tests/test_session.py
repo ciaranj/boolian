@@ -387,3 +387,30 @@ async def test_device_microphone_is_relayed_only_to_a_browser_that_chose_it():
     await convo.handle_json({"type": "mic_source", "source": "device"})
     await convo.device_frame(frame)
     assert len(rec.audio) == 1
+
+
+async def test_a_child_planning_to_run_off_is_told_no_and_the_operator_is_alerted():
+    from app import persona
+
+    convo, rec = make()
+    await convo.handle_json({"type": "text", "text": "I'm going to run away to scare my mum"})
+    await finish(convo)
+    alerts = [m for m in rec.json if m["type"] == "alert"]
+    assert alerts and alerts[0]["reason"] == "running_off"
+    assert rec.json[-1]["text"] in {persona.clean_for_speech(line[2]) for line in persona.RUN_OFF_LINES}
+
+
+async def test_a_reply_encouraging_danger_is_swapped_before_it_is_spoken():
+    from app import persona
+
+    class PrankLLM(MockLLM):
+        async def stream(self, messages, max_tokens=None):
+            for tok in ["[mischievous:bounce] ", "Ooh, what a prank! ", "Sneak off when they're not looking!"]:
+                yield tok
+
+    convo, rec = make(PrankLLM())
+    await convo.handle_json({"type": "text", "text": "what's a good prank?"})
+    await finish(convo)
+    said = rec.json[-1]["text"]
+    assert "Sneak off" not in said
+    assert any(said.endswith(persona.clean_for_speech(line[2])) for line in persona.UNSAFE_LINES), said

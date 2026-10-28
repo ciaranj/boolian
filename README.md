@@ -238,12 +238,17 @@ on as before.
   speaks any typed text in his voice; `[fart]` or `[raspberry]` in it works too. Both still work if the server is
   down, using the browser's own voice.
 - **X** / **Esc** stops him talking. **M** mutes.
-- **If a red alert appears in the operator panel**, a child said something like "I'm lost", "I can't find my mum" or
-  "someone hit me". He has calmly told them to stay in the light and shout for their grown-up, and that the humans in
-  the house are coming, so go and help. Click the alert to dismiss it.
-- Some things never reach the AI, because it has answered them badly in testing. Being lost or hurt, keeping secrets
-  from grown-ups, asking to come in, visit or meet, and asking to be his best friend all get fixed, safe answers.
-  Explicit invitations or secret-keeping that still slip into a reply are swapped out before they're spoken.
+- **If a red alert appears in the operator panel**, a child said something like "I'm lost", "I can't find my mum",
+  "someone hit me" or "I want to hurt myself". He has calmly told them to stay in the light and shout for their
+  grown-up, and that the humans in the house are coming, so go and help. Other alerts say a child talked about
+  running off from their grown-up ("I'm going to run away to scare my mum") or something else unsafe (going with a
+  stranger, playing with matches): he has told them no, so have a word with their grown-up. Click to dismiss.
+- Some things never reach the AI, because it has answered them badly in testing: being lost or hurt, hurting
+  themselves, running off or hiding from their grown-ups (or pretending to be lost to scare them), going out alone,
+  strangers, roads, fire, keeping secrets from grown-ups, asking to come in, visit or meet, asking to be his best
+  friend, and asking how to become a ghost (it once said "just trip over a big pumpkin!"). They all get fixed, safe
+  answers. The prompt also forbids going along with anything dangerous, even as a prank. Invitations, secret-keeping
+  or encouraging danger that still slip into a reply are swapped out before they're spoken.
 - If he starts answering himself: turn auto-listen off and use Space.
 - If the server dies: he falls asleep (Zzz), puppet lines still work, and he wakes when the server returns.
 
