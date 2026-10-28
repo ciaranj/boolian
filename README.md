@@ -173,6 +173,10 @@ signal, reconnects, free memory, and the PIR state with its raw flips that secon
   if it clips, lower it. To hear what it hears:
   `server/.venv/bin/python scripts/listen_mic.py ws://SPECTRE_IP:8765/ws --seconds 10 && afplay esp32.wav`.
   A faint hiss is the INMP441's own noise floor (about −60 dBFS), well below the room; Whisper and Silero ignore it.
+- **Listening live.** `scripts/monitor_mic.py ws://SPECTRE_IP:8765/ws` plays what it hears through the Mac (use
+  headphones, or it howls), with the hum, speech and hiss levels twice a second. It needs `pip install sounddevice`.
+- **Power it from a charger or power bank, into the left (UART) USB-C socket.** From the Mac's USB, or the C5's own
+  socket, it picked up a low hum about 12 dB louder, which buried quiet speech and wrecked Whisper's accuracy.
 - **PIR.** Cover it with a mug (glass and plastic block body heat): it should say "motion stopped" and stay quiet.
   Uncover it and wave: "motion seen", held about 2 s after you stop. Give it a minute after power-on to settle,
   and expect it to keep firing while you sit in front of it. A stream of raw flips means a loose or noisy OUT wire;
