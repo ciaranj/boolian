@@ -120,6 +120,11 @@ export class Ghost3D {
   private armMat: THREE.MeshStandardMaterial;
   private armOutlineMat: THREE.MeshBasicMaterial;
   private arms: { side: -1 | 1; pivot: THREE.Group }[] = [];
+  private bow = new THREE.Group();
+  private bowMat = new THREE.MeshStandardMaterial({ roughness: 0.25, transparent: true, opacity: 0.92 });
+  private bowOutlineMat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, transparent: true });
+  private bowLoops: { side: -1 | 1; mesh: THREE.Mesh }[] = [];
+  private bowTails: { side: -1 | 1; mesh: THREE.Mesh }[] = [];
   private outlines: THREE.Object3D[] = [];
   private face: ReturnType<typeof paintedTexture>;
   private overlay = paintedTexture(256);
@@ -248,6 +253,8 @@ export class Ghost3D {
       this.outlines.push(armOutline);
     }
 
+    this.buildBow();
+
     // ---- thinking dots and zzz: painted by Ghost, on a card that bobs with him but doesn't spin
     const os = OVERLAY_BOX.size / 100;
     this.overlayMesh = new THREE.Mesh(
@@ -338,6 +345,9 @@ export class Ghost3D {
     this.pulse *= Math.exp(-2.5 * dt);
     this.deformBody(t, g.dragAmount, g.state === "speaking" ? g.speechLevel : 0);
     for (const { side, pivot } of this.arms) pivot.rotation.z = -g.armAngle(side);
+    this.bow.visible = s.bow;
+    for (const { side, mesh } of this.bowLoops) mesh.scale.setScalar(1 + Math.sin(t * 2.2 + side * 0.8) * 0.06);
+    for (const { side, mesh } of this.bowTails) mesh.rotation.z = side * 0.35 + Math.sin(t * 2.6 + side * 1.3) * 0.12;
     this.paintFace();
     this.paintOverlay();
 
@@ -352,6 +362,9 @@ export class Ghost3D {
       m.emissiveIntensity = (0.1 + 0.16 * l.glow) * dim;
     }
     this.faceMat.opacity = fade;
+    this.bowMat.opacity = 0.92 * fade;
+    this.bowOutlineMat.opacity = 0.85 * fade;
+    this.bowMat.emissiveIntensity = (0.22 + 0.12 * l.glow + 0.1 * Math.sin(t * 0.9)) * dim; // the shimmer
     this.outlineMat.uniforms.opacity.value = fade;
     this.armOutlineMat.opacity = fade;
     this.haloMat.uniforms.strength.value = clamp(0.5 * l.glow, 0, 1.6) * fade * dim;
@@ -530,6 +543,57 @@ export class Ghost3D {
   // ------------------------------------------------------------------ body geometry
 
   /** Vertices in rows from the crown down, COLS around; u = 0 faces the camera. */
+  /** A ribbon bow on the top right of his head: the 2D drawBow's loop and tail outlines, extruded, and a knot. */
+  private buildBow() {
+    const part = (geo: THREE.BufferGeometry, outline: number) => {
+      const mesh = new THREE.Mesh(geo, this.bowMat);
+      const edge = new THREE.Mesh(geo, this.bowOutlineMat);
+      edge.scale.set(outline, outline, 1); // wider, and set back, so it rims the ribbon instead of tinting it
+      edge.position.z = -0.025;
+      mesh.add(edge);
+      this.outlines.push(edge);
+      this.bow.add(mesh);
+      return mesh;
+    };
+    // Outlines in 2D ghost units (y down), turned into 3D units (y up) and centred in z.
+    const ribbon = (draw: (s: THREE.Shape) => void) => {
+      const shape = new THREE.Shape();
+      draw(shape);
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: 4, bevelEnabled: true, bevelThickness: 2, bevelSize: 1.5, bevelSegments: 3, curveSegments: 16,
+      });
+      geo.scale(0.01, 0.01, 0.01);
+      geo.rotateX(Math.PI); // y down to y up; a negative scale would turn the faces inside out
+      geo.translate(0, 0, 0.02);
+      return geo;
+    };
+    for (const side of [-1, 1] as const) {
+      const tail = part(ribbon((sh) => {
+        sh.moveTo(side * 2, 4);
+        sh.quadraticCurveTo(side * 6, 16, side * 16, 30);
+        sh.lineTo(side * 11, 26);
+        sh.lineTo(side * 5, 32);
+        sh.quadraticCurveTo(side * 1, 17, side * -4, 5);
+      }), 1.08);
+      tail.position.z = -0.03;
+      this.bowTails.push({ side, mesh: tail });
+      const loop = part(ribbon((sh) => {
+        sh.moveTo(0, 0);
+        sh.bezierCurveTo(side * 12, -28, side * 46, -32, side * 44, -6);
+        sh.bezierCurveTo(side * 42, 14, side * 16, 12, 0, 0);
+      }), 1.07);
+      this.bowLoops.push({ side, mesh: loop });
+    }
+    part(new THREE.SphereGeometry(0.09, 16, 12), 1.25).scale.set(1, 0.9, 0.7);
+    // Perched on the head (a unit sphere), standing a little proud of it and facing the front, tilted with the curve.
+    const at = new THREE.Vector3(0.5, 0.82, 0.42).normalize().multiplyScalar(1.04);
+    this.bow.position.copy(at);
+    this.bow.lookAt(at.clone().add(new THREE.Vector3(0.15, 0.2, 1)));
+    this.bow.rotateZ(-0.55);
+    this.bow.scale.setScalar(1.3);
+    this.spinner.add(this.bow);
+  }
+
   private buildBody(): Float32Array {
     const n = ROWS * COLS;
     this.bodyGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
@@ -651,6 +715,10 @@ export class Ghost3D {
     const rim = new THREE.Color(p.rim);
     this.outlineMat.uniforms.color.value.copy(rim);
     this.armOutlineMat.color.copy(rim);
+    const blush = rgb(p.blush);
+    this.bowMat.color.copy(blush).lerp(WHITE, 0.6);
+    this.bowMat.emissive.copy(blush).lerp(WHITE, 0.35);
+    this.bowOutlineMat.color.copy(blush).multiplyScalar(0.5);
     for (const o of this.outlines) o.visible = p.rimWidth > 0;
     this.haloMat.uniforms.color.value.copy(this.glowColor);
     this.rimColor.value.copy(this.glowColor).lerp(WHITE, 0.3);

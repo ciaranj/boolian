@@ -455,7 +455,8 @@ function startStage() {
 
   function applySettings() {
     ghost.settings = { scale: settings.scale, offsetX: settings.offsetX, offsetY: settings.offsetY,
-      clipLeft: settings.clipLeft, clipRight: settings.clipRight, lurkDepth: settings.lurkDepth, glow: settings.glow };
+      clipLeft: settings.clipLeft, clipRight: settings.clipRight, lurkDepth: settings.lurkDepth, glow: settings.glow,
+      bow: settings.bow };
     const { clipTop: t, clipRight: r, clipBottom: b, clipLeft: l } = settings;
     document.documentElement.style.setProperty("--viewport", `inset(${t * 100}% ${r * 100}% ${b * 100}% ${l * 100}%)`);
     ghost.palette = paletteOf(q.get("palette") ?? settings.palette);

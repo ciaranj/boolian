@@ -30,6 +30,8 @@ export class Panel {
 
     const attract = $<HTMLInputElement>("attract");
     attract.addEventListener("change", () => run({ c: "settings", patch: { attract: attract.checked } }));
+    const bow = $<HTMLInputElement>("s-bow");
+    bow.addEventListener("change", () => run({ c: "settings", patch: { bow: bow.checked } }));
     const auto = $<HTMLInputElement>("auto-listen");
     auto.addEventListener("change", () => run({ c: "auto", on: auto.checked }));
 
@@ -204,6 +206,7 @@ export class Panel {
     $<HTMLInputElement>("auto-listen").checked = s.autoListen;
     this.attractOn = s.attract;
     $<HTMLInputElement>("attract").checked = s.attract;
+    $<HTMLInputElement>("s-bow").checked = s.bow;
     const server = $<HTMLInputElement>("server");
     if (document.activeElement !== server) server.value = s.serverUrl;
   }

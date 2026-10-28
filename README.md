@@ -38,6 +38,9 @@ The mock ghost babbles in a warbly voice and cycles through canned replies.
 Add `&renderer=3d` for the three.js version: a lit 3D body with bloom, coloured mood lighting and real spins, using
 the same face and behaviour. `&q3d=low` drops the bloom for a weaker GPU. Without it you get the original 2D ghost.
 
+He wears a ghostly ribbon bow on his head, in his colour scheme's pink, in both versions; untick **Bow** in the
+operator panel (under Projection) to take it off.
+
 To use a real LLM on the laptop as well, any OpenAI-compatible server works. This was tested with Ollama's `llama3.2`:
 
 ```bash

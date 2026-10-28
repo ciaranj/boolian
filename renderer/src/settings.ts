@@ -21,6 +21,7 @@ export interface Settings {
   autoListen: boolean;
   attract: boolean; // he calls out now and then while nobody is talking to him
   palette: string;
+  bow: boolean; // a ghostly ribbon bow on his head
   micDevice: string; // "" = the system default input
   vad: "silero" | "energy"; // how auto-listen decides someone is talking
   vadThreshold: number; // Silero speech probability needed (lower = more sensitive)
@@ -56,6 +57,7 @@ export function loadSettings(): Settings {
     autoListen: false,
     attract: true,
     palette: "spectral",
+    bow: true,
     micDevice: "",
     vad: "silero",
     vadThreshold: 0.5,

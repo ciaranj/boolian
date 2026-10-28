@@ -16,7 +16,11 @@ export interface GhostSettings {
   clipRight: number;
   lurkDepth: number; // how much smaller he looks hanging back with nobody about (0 = he never does)
   glow: number;
+  bow: boolean;
 }
+
+/** Where the bow's knot sits on his head (body units, y down; his head is a circle of radius 100) and its tilt. */
+export const BOW = { x: 60, y: -94, rot: 0.55, size: 1.3 };
 
 /** How long after the last listening/thinking/speaking he stays forward, by why he came. */
 const HOLD_ENGAGED_S = 60; // the server normally forgets the visitor (and he sinks back) well before this
@@ -103,7 +107,7 @@ export class Ghost {
   speechLevel = 0;
   /** Visitor microphone loudness 0..1 while listening. */
   micLevel = 0;
-  settings: GhostSettings = { scale: 1, offsetX: 0, offsetY: 0, clipLeft: 0, clipRight: 0, lurkDepth: 0, glow: 1 };
+  settings: GhostSettings = { scale: 1, offsetX: 0, offsetY: 0, clipLeft: 0, clipRight: 0, lurkDepth: 0, glow: 1, bow: true };
   /** Screen width / height, set by whoever owns the canvas; the peek needs it to find the mask edges. */
   aspect = 16 / 9;
   palette: Palette = PALETTES.spectral;
@@ -554,6 +558,7 @@ export class Ghost {
       ctx.stroke();
     } else {
       this.drawBody(ctx, l.glow, unit);
+      if (s.bow) this.drawBow(ctx, l.glow, unit);
       this.drawFartCloud(ctx);
       this.drawFace(ctx);
       if (this.state === "thinking") this.drawThinkingDots(ctx);
@@ -668,6 +673,80 @@ export class Ghost {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  /** A ribbon bow perched on his head, in his blush colour: see-through and glowing, with breathing loops,
+   * fluttering tails and a shimmer that drifts across it. */
+  private drawBow(ctx: CanvasRenderingContext2D, glow: number, unit: number) {
+    const [r, g, b] = this.palette.blush;
+    const t = this.t;
+    const pale = `rgba(${Math.round(r + (255 - r) * 0.65)}, ${Math.round(g + (255 - g) * 0.65)}, ${Math.round(b + (255 - b) * 0.65)}, 0.8)`;
+    const deep = `rgba(${Math.round(r * 0.55)}, ${Math.round(g * 0.45)}, ${Math.round(b * 0.6)}, 0.85)`;
+    const shimmer = 0.5 + 0.5 * Math.sin(t * 0.9);
+    const fill = ctx.createLinearGradient(-45, -30, 45, 30);
+    fill.addColorStop(0, pale);
+    fill.addColorStop(clamp(shimmer * 0.8 + 0.1, 0, 1), `rgba(255, 255, 255, 0.85)`);
+    fill.addColorStop(1, rgba([r, g, b], 0.75));
+
+    ctx.save();
+    ctx.translate(BOW.x, BOW.y);
+    ctx.rotate(BOW.rot + Math.sin(t * 1.3) * 0.05);
+    ctx.scale(BOW.size, BOW.size);
+    ctx.shadowColor = rgba([r, g, b], 0.9 * Math.min(glow, 1.2));
+    ctx.shadowBlur = 22 * glow * unit;
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = deep;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = "round";
+
+    // tails first, so the loops and knot sit over them
+    for (const side of [-1, 1] as const) {
+      const w = Math.sin(t * 2.6 + side * 1.3) * 4;
+      ctx.beginPath();
+      ctx.moveTo(side * 2, 4);
+      ctx.quadraticCurveTo(side * 6 + w * 0.5, 16, side * 16 + w, 30);
+      ctx.lineTo(side * 11 + w, 26); // the notch in the ribbon's end
+      ctx.lineTo(side * 5 + w, 32);
+      ctx.quadraticCurveTo(side * 1 + w * 0.3, 17, side * -4, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    for (const side of [-1, 1] as const) {
+      const breathe = 1 + Math.sin(t * 2.2 + side * 0.8) * 0.06;
+      ctx.save();
+      ctx.scale(breathe, breathe);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(side * 12, -28, side * 46, -32, side * 44, -6);
+      ctx.bezierCurveTo(side * 42, 14, side * 16, 12, 0, 0);
+      ctx.fill();
+      ctx.stroke();
+      // the fold inside the loop
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.moveTo(side * 6, -3);
+      ctx.quadraticCurveTo(side * 22, -16, side * 34, -8);
+      ctx.strokeStyle = rgba([r, g, b], 0.6);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // a glint along the top edge
+      ctx.beginPath();
+      ctx.moveTo(side * 14, -18);
+      ctx.quadraticCurveTo(side * 26, -26, side * 38, -20);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 + 0.35 * shimmer})`;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = deep;
+      ctx.lineWidth = 2.5;
+    }
+    ctx.beginPath();
+    ctx.ellipse(0, 1, 9, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** In ghost units around the body centre; the 3D renderer paints it onto a texture. */
