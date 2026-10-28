@@ -184,6 +184,20 @@ def is_goodbye(text: str) -> bool:
     return bool(_GOODBYE.search(text))
 
 
+# Him saying goodbye: visitors often just say "thank you" and leave, and he says farewell for them.
+_FAREWELL = re.compile(
+    r"\b(good ?bye|bye for now|bye[- ]bye|farewell|cheerio|ta[- ]ta|see you (soon|later|again|next|another))\b",
+    re.IGNORECASE,
+)
+# "Say goodbye to your fears", "goodbye kisses": a goodbye that isn't a farewell to the visitors.
+_NOT_FAREWELL = re.compile(r"\bsay(ing)? good ?bye to\b|\bgood ?bye (kiss|hug|song|wave)s?\b", re.IGNORECASE)
+
+
+def is_farewell(reply: str) -> bool:
+    """Boolian wishing the visitors farewell."""
+    return bool(_FAREWELL.search(reply)) and not _NOT_FAREWELL.search(reply)
+
+
 # Said the instant a visitor stops talking, while a slow voice prepares the real reply.
 # They come before he knows what was said, so each must suit any reply.
 FILLER_LINES = [

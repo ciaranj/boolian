@@ -333,3 +333,14 @@ async def test_secrets_from_grown_ups_are_never_kept():
     await convo.handle_json({"type": "text", "text": "guess what I did today"})
     await finish(convo)
     assert "sealed" not in rec.json[-1]["text"] and any(rec.json[-1]["text"].endswith(s) for s in secret)
+
+
+async def test_he_forgets_the_visitors_when_he_says_goodbye_himself():
+    class Farewell(MockLLM):
+        async def stream(self, messages, max_tokens=None):
+            yield "[happy] You're very welcome! Goodbye for now, and have a smashing time!"
+
+    convo, rec = make(Farewell())
+    await convo.handle_json({"type": "text", "text": "thank you"})
+    await finish(convo)
+    assert not convo.history and rec.json[-1] == {"v": 1, "type": "session_reset", "reason": "he said goodbye"}

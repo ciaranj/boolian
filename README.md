@@ -19,7 +19,7 @@ Laptop browser (remote window → its screen)                         Chatterbox
 chosen per reply. He makes a reaction noise the moment a visitor stops talking, so the wait for the real answer is
 covered. He remembers the last 25 exchanges and knows the date and rough time of night. He asks open questions, and
 blows the odd raspberry or farts (real recordings, with animations to match). If nobody answers, he asks twice
-whether anyone's there, then forgets them; he also forgets them when they say goodbye.
+whether anyone's there, then forgets them; he also forgets them when they say goodbye, or when he does (visitors often just say "thank you" and go).
 
 ## Try it now on a laptop (no GPU, no VM)
 

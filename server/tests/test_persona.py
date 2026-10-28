@@ -175,3 +175,14 @@ def test_fixed_answers_for_what_the_llm_got_wrong():
         assert is_secret_keeping(reply), reply
     for reply in ["Guess what scares me most? The dark!", "You can always tell your grown-ups anything."]:
         assert not is_secret_keeping(reply), reply
+
+
+def test_his_farewells():
+    from app.persona import is_farewell
+
+    for reply in ["You're very welcome! Goodbye for now, and have a smashing time!", "Bye-bye, little pumpkins!",
+                  "Farewell, brave witch!", "Cheerio! Happy Halloween!", "See you soon, and enjoy your sweets!"]:
+        assert is_farewell(reply), reply
+    for reply in ["Say goodbye to your fears, I'm a friendly ghost!", "What a lovely costume!", "Do you know any goodbye songs?",
+                  "I've been haunting this house for 173 years."]:
+        assert not is_farewell(reply), reply

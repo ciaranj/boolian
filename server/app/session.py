@@ -318,9 +318,9 @@ class Conversation:
         tag = persona.parse_tag(reply["tag"] or "[neutral]")
         self._log_reply(timing, " ".join(spoken), tag.emotion, tag.action, "llm" if timing.outcome == "ok" else timing.outcome)
         await self._send(gen, {"type": "reply", "text": " ".join(spoken)})
-        if persona.is_goodbye(user_text) and gen == self.generation:
-            # He's already said goodbye back; forget them without cutting that off.
-            await self._forget("goodbye")
+        if gen == self.generation and (persona.is_goodbye(user_text) or persona.is_farewell(" ".join(spoken))):
+            # Either of them said goodbye, and his reply has finished; forget them without cutting that off.
+            await self._forget("goodbye" if persona.is_goodbye(user_text) else "he said goodbye")
 
     def _log(self, kind: str, **fields) -> None:
         self.convo_log.write({"conn": self.conn, "convo": self.convo, "kind": kind, **fields})
