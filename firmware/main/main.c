@@ -117,6 +117,8 @@ static void ws_start(void) {
     esp_websocket_client_config_t cfg = {
         .uri = SERVER_URI,
         .reconnect_timeout_ms = 2000,
+        // Without this, a clean close from the server (it restarting) stops the client for good.
+        .enable_close_reconnect = true,
         .network_timeout_ms = 5000,
         .buffer_size = 1024,
         .ping_interval_sec = 5,
@@ -226,6 +228,7 @@ void app_main(void) {
     xTaskCreate(send_task, "send", 4096, NULL, 8, NULL);
 
     // Watch the PIR, and once a second print the diagnostics (sending them to the server every 5 s).
+    int offline_s = 0;
     int motion = -1;
     int last_raw = 0, same = 0, flips = 0;  // flips: raw changes in the last second, for spotting a noisy PIR wire
     int tick = 0;
@@ -247,6 +250,17 @@ void app_main(void) {
             send_text(now ? "{\"v\":1,\"type\":\"motion\",\"on\":true}" : "{\"v\":1,\"type\":\"motion\",\"on\":false}");
         }
         if (++tick % 20) continue;
+
+        // A last resort if the client still won't come back: restart it, and after two minutes the whole board.
+        offline_s = ws_up ? 0 : offline_s + 1;
+        if (offline_s == 30 || offline_s == 60 || offline_s == 90) {
+            ESP_LOGW(TAG, "offline for %d s; restarting the connection", offline_s);
+            esp_websocket_client_stop(ws);
+            esp_websocket_client_start(ws);
+        } else if (offline_s >= 120) {
+            ESP_LOGE(TAG, "offline for two minutes; rebooting");
+            esp_restart();
+        }
 
         float rms = level_n ? sqrtf(level_sum / level_n) : 0, peak = level_peak;
         level_sum = 0, level_n = 0, level_peak = 0;
