@@ -170,17 +170,43 @@ The serial monitor prints a line a second: level and peak in dBFS, clipping, fra
 signal, reconnects, free memory, and the PIR state with its raw flips that second.
 
 - **Microphone.** Speech close to it should reach about −30 dBFS. If it barely moves, raise `MIC_GAIN` in `main.c`;
-  if it clips, lower it. To hear what it hears:
-  `server/.venv/bin/python scripts/listen_mic.py ws://SPECTRE_IP:8765/ws --seconds 10 && afplay esp32.wav`.
-  A faint hiss is the INMP441's own noise floor (about −60 dBFS), well below the room; Whisper and Silero ignore it.
-- **Listening live.** `scripts/monitor_mic.py ws://SPECTRE_IP:8765/ws` plays what it hears through the Mac (use
-  headphones, or it howls), with the hum, speech and hiss levels twice a second. It needs `pip install sounddevice`.
-- **Power it from a charger or power bank, into the left (UART) USB-C socket.** From the Mac's USB, or the C5's own
-  socket, it picked up a low hum about 12 dB louder, which buried quiet speech and wrecked Whisper's accuracy.
+  if it clips, lower it.
 - **PIR.** Cover it with a mug (glass and plastic block body heat): it should say "motion stopped" and stay quiet.
   Uncover it and wave: "motion seen", held about 2 s after you stop. Give it a minute after power-on to settle,
   and expect it to keep firing while you sit in front of it. A stream of raw flips means a loose or noisy OUT wire;
   the firmware ignores anything shorter than 300 ms.
+- **Power** it from a phone charger or power bank, into the left (UART) USB-C socket. From the Mac's USB it
+  picked up more hum (though the VDD wire below may have been loose at the time).
+
+### Diagnostics: when he mishears
+
+If Whisper's transcripts in the operator log go bad, it's almost always the sound reaching the server, not Whisper.
+Two tools let you hear and measure exactly what the ESP32 sends:
+
+- **Listen live:** `scripts/monitor_mic.py ws://SPECTRE_IP:8765/ws` plays the mic through the Mac about a quarter
+  of a second behind, boosted 4× so faint noises are audible (`--gain 1` for the real level). Twice a second it
+  prints the overall level and three bands: **hum** (under 300 Hz), **speech** (300 Hz–3 kHz) and **hiss**
+  (3–8 kHz). Wiggle wires, swap power or move the mic and watch the numbers change. **Use headphones**: through the
+  speakers it feeds back on itself. It needs `pip install sounddevice` alongside the server's dev dependencies;
+  Ctrl-C stops it.
+- **Record a clip:** `scripts/listen_mic.py ws://SPECTRE_IP:8765/ws --seconds 10 && afplay esp32.wav`.
+
+Both connect like a browser with attract mode off, so he won't talk to them. Turn auto-listen off in the operator
+panel while testing, or he'll answer what you say.
+
+**Healthy, in a quiet room with nobody talking:** hum about −50 dBFS, speech band and hiss both about −64 dBFS, and
+steady from one reading to the next. Speech close by lifts the speech band to −25 to −35.
+
+| What you hear or see | Likely cause | Fix |
+|---|---|---|
+| **Still hears, but hissy, buzzy or "far away"; hiss band nearer −56 than −64 and jumpy; Whisper suddenly much worse** | **A loose or missing VDD wire.** The INMP441 keeps working without it, powered weakly through its clock pins (SCK, WS), so nothing obviously fails | Reseat VDD firmly on 3V3 at both ends. Don't run it like this: it strains those ESP32 pins |
+| A low buzz, hum band well above −50 | Mac USB power, or wiring near the board or Wi-Fi antenna | A charger into the left socket; move the mic's wire bundle away from the board |
+| Silence, and the operator panel says the ESP32 isn't connected | Lost Wi-Fi, or the server restarted (it reconnects within seconds; after two minutes offline it reboots itself) | Check its serial log; power-cycle it |
+| Clipping counted on the serial line with nobody near it | A loose connection crackling | Reseat all five mic wires |
+| Background suddenly 20 dB louder | Something real: a fan, the boiler, or a cat sitting by the mic | Find it |
+
+The loose-VDD case is the one to remember: it cost an afternoon. The mic sounded "a bit worse" rather than dead,
+it got worse after the board was handled, and the cure was pushing one jumper back on.
 
 ### The case
 
