@@ -144,6 +144,9 @@ The serial monitor prints a line a second: level and peak in dBFS, clipping, fra
 reconnects, free memory and the PIR state. Speech close to it should reach about −30 dBFS. If it barely moves,
 raise `MIC_GAIN` in `main.c`; if it clips, lower it.
 
+To hear what it hears: `server/.venv/bin/python scripts/listen_mic.py ws://SPECTRE_IP:8765/ws --seconds 10 && afplay esp32.wav`.
+It records what the server relays, printing the level each second.
+
 In the operator panel, choose **ESP32 microphone (via the server)** under Microphone. The info line shows its name,
 Wi-Fi signal and dropped frames, and the log says when it connects, disconnects or sees motion.
 
@@ -220,7 +223,7 @@ server/assets/   the fart and raspberry recordings (credits in noises/CREDITS.md
 firmware/        ESP-IDF project for the ESP32-C5: microphone and PIR
 renderer/        Vite + TypeScript, Canvas 2D ghost, or three.js with ?renderer=3d
 scripts/         llm-container.sh and spectre-container.sh (setup and services), smoke_test.py (end-to-end turns and
-                 latency), selftest_gpu.py, bench_chatterbox.py, make_noises.py / import_noises.py
+                 latency), listen_mic.py (record the ESP32 to a WAV), selftest_gpu.py, bench_chatterbox.py, make_noises.py / import_noises.py
 infra/           docker compose for the older Docker route
 docs/            protocol-v1.md
 ```
