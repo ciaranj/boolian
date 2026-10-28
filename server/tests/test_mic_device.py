@@ -34,5 +34,4 @@ def test_the_esp32s_microphone_and_motion_reach_the_presenter():
             assert status["rssi"] == -52 and "junk" not in status
             mic.send_text(json.dumps({"type": "motion", "on": True}))
             assert next_json(presenter, "motion")["on"] is True
-            assert next_json(presenter, "expression")["source"] == "motion"
         assert next_json(presenter, "mic_device")["connected"] is False

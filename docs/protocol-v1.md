@@ -20,7 +20,7 @@ therefore cannot play.
 | `listen_abort` | | discard captured audio (too short, operator cancel) |
 | `text` | `text` | typed visitor input (operator panel); skips STT |
 | `say` | `text`, `emotion`, `action` | puppet line: speak exactly this, no LLM |
-| `greet` | | random canned greeting |
+| `greet` | `source?` | random canned greeting. With `source: "motion"` it's the browser asking to greet someone the PIR saw: the server only does it with nobody talking to him, attract mode on, and at most once a minute |
 | `reset` | | cancel and forget the conversation history |
 | `cancel` | | stop the current reply |
 | `playback` | `generation_id`, `event`: `started`/`ended`/`cancelled` | what the speakers are *actually* doing |
@@ -72,7 +72,7 @@ the latest device to connect is listened to.
 | `cancel` | `generation_id`, `reason` |
 | `session_reset` | `reason`: `operator` / `idle` |
 | `mic_device` | `connected`, and while connected `name`, `gaps`, `bad`, plus the device's latest `stats` fields |
-| `motion` | `on`: the ESP32's PIR. With nobody talking to him and attract mode on, motion also triggers a greeting (`source: "motion"`), at most once a minute |
+| `motion` | `on`: the ESP32's PIR. The browser answers with `greet` (`source: "motion"`) unless it has heard anyone talking in the last 2 s, so he doesn't talk over someone who walked up already speaking |
 
 Binary frames starting `GHST` are the ESP32's microphone, relayed (only after `mic_source: device`).
 

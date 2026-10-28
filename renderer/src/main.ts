@@ -195,7 +195,10 @@ function startStage() {
         break;
       }
       case "motion":
-        if (e.on) log("dim", "motion seen");
+        if (e.on) {
+          log("dim", "motion seen");
+          greetOnMotion();
+        }
         break;
       case "session_reset":
         log("dim", `session reset (${e.reason})`);
@@ -273,8 +276,22 @@ function startStage() {
     onMicFrame(pcm, mic.db);
   };
 
+  // Someone walking up often starts talking at once. Greeting them then would talk over their first words, and the
+  // voice detector takes a moment to say "start", so it's the browser, which can hear them, that asks to greet.
+  let lastVoiceAt = -1e9;
+  let roomDb = -60; // the room's background level, followed slowly (quickly downwards)
+  function greetOnMotion() {
+    if (!awake || capturing || conv !== "idle" || out.playing || speakingLocally) return;
+    if (performance.now() - lastVoiceAt < 2000) return;
+    link.send({ type: "greet", source: "motion" });
+  }
+
   mic.onFrame = onMicFrame;
   function onMicFrame(pcm: Int16Array, db: number) {
+    // Anything that sounds a bit like speech, even below where auto-listen would start capturing: Silero's guess
+    // when it's listening, or just noticeably louder than the room.
+    roomDb += (db - roomDb) * (db < roomDb ? 0.05 : 0.002);
+    if ((vad instanceof SileroVad && vadOpen && vad.prob > 0.3) || db > roomDb + 10) lastVoiceAt = performance.now();
     ghost.micLevel = capturing ? Math.min(1, Math.max(0, (db + 55) / 40)) : 0;
     if (capturing) {
       link.sendMic(pcm);

@@ -101,6 +101,8 @@ class Conversation:
                     await self.cancel("puppet")
                 emotion, action = str(msg.get("emotion", "neutral")), str(msg.get("action", "none"))
                 self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="puppet"))
+        elif kind == "greet" and msg.get("source") == "motion":
+            self._motion_greet()
         elif kind == "greet":
             if self.busy:
                 await self.cancel("greet")
@@ -151,12 +153,16 @@ class Conversation:
         await self._send_json({"v": 1, "type": "mic_device", **status})
 
     async def motion(self, on: bool) -> None:
-        """The PIR saw someone (or stopped seeing them). With nobody talking to him, he greets them."""
+        """The PIR saw someone (or stopped seeing them). The browser decides whether to greet them: it can hear
+        whether they've already started talking, which the server can't until its voice detector has decided."""
         await self._send_json({"v": 1, "type": "motion", "on": on})
-        if not on or not self.attract or not self.cfg.motion_greet_s:
-            return
+
+    def _motion_greet(self) -> None:
+        """A greeting for whoever the PIR saw, if nobody is talking to him and he hasn't greeted anyone lately."""
         now = time.monotonic()
-        if self.busy or self.listening or self.history or now - self.last_motion_greet < self.cfg.motion_greet_s:
+        if not self.attract or not self.cfg.motion_greet_s or self.busy or self.listening or self.history:
+            return
+        if now - self.last_motion_greet < self.cfg.motion_greet_s:
             return
         self.last_motion_greet = now
         log.info("motion: greeting")

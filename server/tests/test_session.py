@@ -348,34 +348,39 @@ async def test_he_forgets_the_visitors_when_he_says_goodbye_himself():
     assert not convo.history and rec.json[-1] == {"v": 1, "type": "session_reset", "reason": "he said goodbye"}
 
 
-async def test_motion_greets_newcomers_once_a_minute():
+async def test_motion_is_passed_to_the_browser_which_asks_for_the_greeting():
     convo, rec = make()
     await convo.motion(True)
+    assert rec.json == [{"v": 1, "type": "motion", "on": True}] and not convo.busy  # the browser decides
+
+    await convo.handle_json({"type": "greet", "source": "motion"})
     await finish(convo)
-    assert rec.json[0] == {"v": 1, "type": "motion", "on": True}
     assert [m["source"] for m in rec.json if m["type"] == "expression"] == ["motion"]
     assert len(convo.history) == 1  # a greeting starts a conversation, so "still there?" follows if they don't answer
 
     convo.history.clear()
-    await convo.motion(True)  # someone else, too soon after
+    await convo.handle_json({"type": "greet", "source": "motion"})  # someone else, too soon after
     assert not convo.busy
     convo.last_motion_greet -= 61
-    await convo.motion(False)  # they've stopped moving: nothing to greet
-    assert not convo.busy
-    await convo.motion(True)
+    await convo.handle_json({"type": "greet", "source": "motion"})
     assert convo.busy
 
 
-async def test_motion_doesnt_interrupt_a_conversation_or_a_switched_off_attract_mode():
+async def test_motion_doesnt_greet_over_a_conversation_a_listening_mic_or_a_switched_off_attract_mode():
     convo, _rec = make()
     await convo.handle_json({"type": "text", "text": "hello"})
     await finish(convo)
-    await convo.motion(True)  # their friend walking up behind them
+    await convo.handle_json({"type": "greet", "source": "motion"})  # their friend walking up behind them
     assert not convo.busy
 
     convo, _rec = make()
+    await convo.handle_json({"type": "listen_start"})
+    await convo.handle_json({"type": "greet", "source": "motion"})
+    assert not convo.busy and convo.listening  # never cuts off someone who's talking
+
+    convo, _rec = make()
     await convo.handle_json({"type": "attract", "on": False})
-    await convo.motion(True)
+    await convo.handle_json({"type": "greet", "source": "motion"})
     assert not convo.busy
 
 
