@@ -35,3 +35,19 @@ def test_the_esp32s_microphone_and_motion_reach_the_presenter():
             mic.send_text(json.dumps({"type": "motion", "on": True}))
             assert next_json(presenter, "motion")["on"] is True
         assert next_json(presenter, "mic_device")["connected"] is False
+
+
+def test_a_silent_esp32_is_dropped_and_shown_as_disconnected(monkeypatch):
+    import dataclasses
+
+    import app.main as main
+
+    monkeypatch.setattr(main, "cfg", dataclasses.replace(main.cfg, mic_idle_s=0.2))
+    with TestClient(app) as client, client.websocket_connect("/ws") as presenter:
+        assert next_json(presenter, "mic_device")["connected"] is False
+        presenter.send_text(json.dumps({"type": "hello", "role": "presenter"}))
+        with client.websocket_connect("/mic") as mic:
+            assert next_json(presenter, "mic_device")["connected"] is True
+            # Sends nothing: a link that died without closing.
+            assert next_json(presenter, "mic_device")["connected"] is False
+            assert mic.receive()["type"] == "websocket.close"

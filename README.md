@@ -198,7 +198,9 @@ Place it 0.5–1 m from where visitors stand, as far from the speaker as you can
 
 In the operator panel, choose **ESP32 microphone (via the server)** under Microphone. The info line shows its name,
 Wi-Fi signal and dropped frames, and the log says when it connects, disconnects or sees motion. Push-to-talk and
-auto-listen work just as with the laptop's mic.
+auto-listen work just as with the laptop's mic. If the server hears nothing from it for 5 s
+(`SPECTRE_MIC_IDLE_S`), it hangs up and shows it as disconnected, so a link that died without closing can't pass
+for a working one; the ESP32 reconnects by itself, and gives up on a dead link after 15 s without a pong.
 
 **Motion:** when the PIR sees someone and nobody is talking to him, he greets them, at most once a minute
 (`SPECTRE_MOTION_GREET_S`, 0 = never). Switching attract mode off (**A**) stops it too. The attract call-outs carry

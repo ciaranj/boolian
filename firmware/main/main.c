@@ -120,6 +120,7 @@ static void ws_start(void) {
         .network_timeout_ms = 5000,
         .buffer_size = 1024,
         .ping_interval_sec = 5,
+        .pingpong_timeout_sec = 15,  // no pong for this long: the link is dead, so reconnect (the default waits 120 s)
     };
     ws = esp_websocket_client_init(&cfg);
     esp_websocket_register_events(ws, WEBSOCKET_EVENT_ANY, ws_event, NULL);

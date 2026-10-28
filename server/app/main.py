@@ -154,7 +154,15 @@ async def mic_device(ws: WebSocket):
     await publish()
     try:
         while True:
-            msg = await ws.receive()
+            try:
+                msg = await asyncio.wait_for(ws.receive(), cfg.mic_idle_s)
+            except asyncio.TimeoutError:
+                # It streams 50 frames a second, so silence means the link has died without closing (a Wi-Fi blip,
+                # a reboot). Hang up, so the panel says it's gone and the ESP32 reconnects.
+                log.warning("mic device silent for %.0f s: dropping it", cfg.mic_idle_s)
+                with contextlib.suppress(Exception):
+                    await ws.close(code=1001)
+                break
             if msg["type"] == "websocket.disconnect":
                 break
             if current_mic is not me:
