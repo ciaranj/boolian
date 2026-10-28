@@ -322,8 +322,11 @@ export class Ghost3D {
     this.lastT = t;
     if (g.palette !== this.palette) this.applyPalette(g.palette);
 
+    // Hanging back moves him away from the camera; x and y grow to match, so he shrinks about his spot.
+    const camZ = this.camera.position.z;
+    const back = camZ * (1 / l.depth - 1);
     this.root.scale.setScalar(s.scale);
-    this.root.position.set(s.offsetX * (this.w / this.h) * VIEW_H, -s.offsetY * VIEW_H, 0);
+    this.root.position.set((s.offsetX * (this.w / this.h) * VIEW_H) / l.depth, (-s.offsetY * VIEW_H) / l.depth, -back);
     this.mover.position.set(l.x / 100, -l.y / 100, 0);
     this.mover.rotation.z = -l.rot;
     this.mover.scale.set(l.sx, l.sy, l.sx);
@@ -340,7 +343,7 @@ export class Ghost3D {
 
     // Hide/peek fade the whole body; sleeping dims the light instead (a see-through mesh looks wrong).
     const fade = l.fade;
-    const dim = g.state === "sleeping" || g.state === "error" ? 0.55 : 1;
+    const dim = (g.state === "sleeping" || g.state === "error" ? 0.55 : 1) * (1 - (1 - l.depth) * 0.8); // and further back, fainter
     const fading = fade < 0.999;
     this.spinner.visible = fade > 0.01;
     for (const m of [this.bodyMat, this.armMat]) {

@@ -158,6 +158,9 @@ function startStage() {
         if (e.text) log("ghost", String(e.text));
         break;
       case "expression":
+        // Calling out to an empty porch only brings him halfway; anything else means someone's there.
+        if (e.source === "attract") ghost.callOut();
+        else ghost.notice();
         // Held until playback ends (relaxSoon), so the face matches the whole line.
         ghost.express(asEmotion(e.emotion), asAction(e.action), Number(e.intensity ?? 0.8), 20000);
         break;
@@ -179,6 +182,7 @@ function startStage() {
       }
       case "session_reset":
         log("dim", `session reset (${e.reason})`);
+        ghost.lurk();
         break;
     }
   };
@@ -306,6 +310,7 @@ function startStage() {
       ghost.relaxSoon(1.5);
       setConv(link.connected ? "idle" : "sleeping");
     };
+    ghost.notice();
     ghost.express(emotion, action, 0.9, 20000);
     speechSynthesis.speak(u);
     log("ghost", `(offline voice) ${text}`);
@@ -424,7 +429,7 @@ function startStage() {
 
   function applySettings() {
     ghost.settings = { scale: settings.scale, offsetX: settings.offsetX, offsetY: settings.offsetY,
-      clipLeft: settings.clipLeft, clipRight: settings.clipRight, glow: settings.glow };
+      clipLeft: settings.clipLeft, clipRight: settings.clipRight, lurkDepth: settings.lurkDepth, glow: settings.glow };
     const { clipTop: t, clipRight: r, clipBottom: b, clipLeft: l } = settings;
     document.documentElement.style.setProperty("--viewport", `inset(${t * 100}% ${r * 100}% ${b * 100}% ${l * 100}%)`);
     ghost.palette = paletteOf(q.get("palette") ?? settings.palette);
@@ -572,8 +577,10 @@ function startStage() {
     } else {
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, cw, ch);
-      if (testPattern) drawTestPattern(ctx, cw, ch, ghost);
-      else ghost.draw(ctx, cw, ch);
+      if (testPattern) {
+        ghost.notice(); // line him up where he'll be when talking, not hanging back
+        drawTestPattern(ctx, cw, ch, ghost);
+      } else ghost.draw(ctx, cw, ch);
     }
     ghost3d?.setVisible(!testPattern);
 

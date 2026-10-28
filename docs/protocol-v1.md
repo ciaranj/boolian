@@ -50,7 +50,7 @@ Malformed frames are dropped and logged.
 | `welcome` | `ghost_name`, `backends`, `input_format` |
 | `state` | `state`: `thinking` / `idle` / `error` |
 | `transcript` | `text`, `rejected` (null, or `too_short`/`empty`/`phantom`/`no_speech`/`low_confidence`), `typed?` |
-| `expression` | `emotion` (neutral, happy, curious, surprised, mischievous, confused), `action` (none, bounce, tilt, spin, hide, peek), `intensity` |
+| `expression` | `emotion` (neutral, happy, curious, surprised, mischievous, confused), `action` (none, bounce, tilt, spin, hide, peek), `intensity`, `source` (`reply` from the LLM, or `attract`, `nudge`, `greeting`, `puppet`, `giving_up`… for canned lines) |
 | `speech_start` | `audio_format`: `{codec: "pcm_s16le", sample_rate, channels: 1}` |
 | `speech_end` | `chunks` |
 | `reply` | `text` (what was actually spoken) |

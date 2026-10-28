@@ -272,7 +272,7 @@ class Conversation:
         queue: asyncio.Queue[Sentence | None] = asyncio.Queue()
         for ev in events:
             if isinstance(ev, Expression):
-                await self._send_expression(gen, ev)
+                await self._send_expression(gen, ev, source)
             else:
                 queue.put_nowait(ev)
         queue.put_nowait(None)
@@ -491,8 +491,9 @@ class Conversation:
         await self._send_json({"v": 1, "generation_id": gen, **msg})
         return True
 
-    async def _send_expression(self, gen: int, ev: Expression) -> None:
-        await self._send(gen, {"type": "expression", "emotion": ev.emotion, "action": ev.action, "intensity": ev.intensity})
+    async def _send_expression(self, gen: int, ev: Expression, source: str = "reply") -> None:
+        await self._send(gen, {"type": "expression", "emotion": ev.emotion, "action": ev.action, "intensity": ev.intensity,
+                               "source": source})
 
     def _on_playback(self, msg: dict) -> None:
         self.touch()

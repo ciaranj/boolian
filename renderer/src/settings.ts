@@ -8,6 +8,7 @@ export interface Settings {
   clipRight: number;
   clipTop: number;
   clipBottom: number;
+  lurkDepth: number; // how far back he hangs with nobody about, as a fraction of his size lost (0 = off)
   glow: number;
   volume: number;
   reverb: number;
@@ -42,6 +43,7 @@ export function loadSettings(): Settings {
     clipRight: 0,
     clipTop: 0,
     clipBottom: 0,
+    lurkDepth: 0.35,
     glow: 1,
     volume: 0.9,
     reverb: 0.35,

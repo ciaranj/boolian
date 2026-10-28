@@ -270,11 +270,13 @@ async def test_attract_mode_calls_out_when_nobody_is_talking():
     said = rec.json[-1]["text"]
     assert rec.json[-1]["type"] == "reply" and said in {persona.clean_for_speech(line[2]) for line in persona.ATTRACT_LINES}
     assert not convo.history  # calling out isn't a conversation, so no "still there?" nudges follow
+    assert [m["source"] for m in rec.json if m["type"] == "expression"] == ["attract"]  # he only half comes forward
 
     # Someone answers it: he remembers what he called out, so "a living room!" makes sense.
     await convo.handle_json({"type": "text", "text": "a living room!"})
     await finish(convo)
     assert [m["role"] for m in convo.history] == ["assistant", "user", "assistant"]
+    assert [m["source"] for m in rec.json if m["type"] == "expression"][-1] == "reply"
 
 
 async def test_operator_can_switch_attract_mode_off():

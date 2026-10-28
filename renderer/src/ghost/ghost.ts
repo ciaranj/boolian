@@ -14,8 +14,13 @@ export interface GhostSettings {
   offsetY: number; // fraction of height
   clipLeft: number; // the viewport mask, as fractions of width (0 = no mask on that side)
   clipRight: number;
+  lurkDepth: number; // how much smaller he looks hanging back with nobody about (0 = he never does)
   glow: number;
 }
+
+/** How long after the last listening/thinking/speaking he stays forward, by why he came. */
+const HOLD_ENGAGED_S = 60; // the server normally forgets the visitor (and he sinks back) well before this
+const HOLD_CALLOUT_S = 5;
 
 interface Face {
   eyeScale: number;
@@ -78,6 +83,7 @@ export interface Layout {
   sy: number;
   alpha: number; // includes the sleepy dimming
   fade: number; // just the hide/peek fade
+  depth: number; // apparent size from distance, 1 = at the front where scale and offset were set
   glow: number;
   calm: number;
 }
@@ -97,7 +103,7 @@ export class Ghost {
   speechLevel = 0;
   /** Visitor microphone loudness 0..1 while listening. */
   micLevel = 0;
-  settings: GhostSettings = { scale: 1, offsetX: 0, offsetY: 0, clipLeft: 0, clipRight: 0, glow: 1 };
+  settings: GhostSettings = { scale: 1, offsetX: 0, offsetY: 0, clipLeft: 0, clipRight: 0, lurkDepth: 0, glow: 1 };
   /** Screen width / height, set by whoever owns the canvas; the peek needs it to find the mask edges. */
   aspect = 16 / 9;
   palette: Palette = PALETTES.spectral;
@@ -129,6 +135,11 @@ export class Ghost {
   private rudeNoise: { kind: Rude; start: number; dur: number } | null = null;
   private lastX = 0;
   private drag = 0;
+  private presence = 0; // 0 hanging back .. 1 at the front
+  private presenceV = 0;
+  private presenceTarget = 0;
+  private presenceHold = 0;
+  private lastActive = -100;
 
   constructor(seed = Date.now()) {
     this.rand = mulberry32(seed);
@@ -140,6 +151,8 @@ export class Ghost {
     const prev = this.state;
     this.state = state;
     this.stateSince = this.t;
+    if (state === "listening" || state === "thinking") this.notice();
+    if (state === "sleeping") this.lurk();
     if (state === "listening") {
       this.squash.kick(-1.2);
       this.gazeTarget = { x: 0, y: 0.15 };
@@ -149,6 +162,30 @@ export class Ghost {
     if (prev === "sleeping" && state === "idle") {
       this.express("surprised", "bounce", 0.8, 1200);
     }
+  }
+
+  /** Someone is talking to him: swoop to the front and stay there while they do. */
+  notice() {
+    if (this.presenceTarget < 1 && this.presence < 0.6) {
+      this.glowBoost = Math.max(this.glowBoost, 0.6);
+      this.squash.kick(2);
+    }
+    this.presenceTarget = 1;
+    this.presenceHold = HOLD_ENGAGED_S;
+    this.lastActive = this.t;
+  }
+
+  /** Attract mode: come halfway forward to call out, and sink back again if nobody answers. */
+  callOut() {
+    if (this.presenceTarget >= 1) return; // already with someone
+    this.presenceTarget = 0.5;
+    this.presenceHold = HOLD_CALLOUT_S;
+    this.lastActive = this.t;
+  }
+
+  /** The visitor has gone (or been forgotten): drift back into the gloom. */
+  lurk() {
+    this.presenceTarget = 0;
   }
 
   express(emotion: Emotion, action: Action = "none", intensity = 0.8, durationMs = 4500) {
@@ -207,6 +244,7 @@ export class Ghost {
     this.mouth = approach(this.mouth, target, target > this.mouth ? 28 : 13, dt);
 
     this.lean = approach(this.lean, this.state === "listening" ? 1 : 0, 5, dt);
+    this.updatePresence(dt);
     this.glowBoost = approach(this.glowBoost, 0, 1.5, dt);
 
     this.bounce.step(dt);
@@ -382,6 +420,24 @@ export class Ghost {
     return pose;
   }
 
+  private updatePresence(dt: number) {
+    if (this.state === "listening" || this.state === "thinking" || this.state === "speaking") this.lastActive = this.t;
+    else if (this.t - this.lastActive > this.presenceHold) this.presenceTarget = 0;
+    // A quick, nearly critically damped swoop forward; a slow drift back.
+    const [k, c] = this.presenceTarget > this.presence ? [40, 11] : [1.5, 2.6];
+    this.presenceV += (k * (this.presenceTarget - this.presence) - c * this.presenceV) * dt;
+    this.presence += this.presenceV * dt;
+    if (this.presence > 1 || this.presence < 0) {
+      this.presence = clamp(this.presence, 0, 1); // never bigger than where he was lined up
+      this.presenceV = 0;
+    }
+  }
+
+  /** Apparent size from how far back he is: 1 at the front. */
+  get depth() {
+    return 1 - this.settings.lurkDepth * (1 - this.presence);
+  }
+
   /** The side to peek from: the masked edge nearest where he floats, else his left (-1) as before. */
   private peekEdge(): -1 | 1 {
     const { clipLeft, clipRight, offsetX } = this.settings;
@@ -398,7 +454,7 @@ export class Ghost {
     const clip = edge < 0 ? s.clipLeft : s.clipRight;
     if (clip <= 0) return 260 * edge; // no mask that side: just pop up beside where he was
     const edgeX = edge < 0 ? clip : 1 - clip; // fraction of width
-    const unitsPerWidth = (this.aspect * 700) / s.scale; // matches draw(): one unit is h / 700 * scale px
+    const unitsPerWidth = (this.aspect * 700) / (s.scale * this.depth); // matches draw(): one unit is h / 700 * scale * depth px
     return (edgeX - 0.5 - s.offsetX) * unitsPerWidth + 15 * edge; // centre just behind the edge
   }
 
@@ -417,6 +473,8 @@ export class Ghost {
     const rot = pose.rot + this.face.tilt + this.tilt.x * 0.05 + Math.sin(t * 0.5 + 1) * 0.03 * calm - this.drag * 0.002;
     const stretch = this.squash.x * 0.04 + this.lean * 0.04;
     const sleepy = this.state === "sleeping" || this.state === "error";
+    const depth = this.depth;
+    const distanceDim = 1 - (1 - depth) * 1.1; // further back, fainter
     return {
       x,
       y: bob + this.bounce.x + pose.dy - 30,
@@ -426,8 +484,10 @@ export class Ghost {
       sy: pose.sy * (1 + stretch) * (1 + this.lean * 0.04),
       alpha: pose.alpha * (sleepy ? 0.78 : 1),
       fade: pose.alpha,
+      depth,
       glow:
-        this.settings.glow * (0.75 + 0.25 * Math.sin(t * 1.4)) + this.speechLevel * 0.5 + this.glowBoost + (this.state === "thinking" ? 0.2 * Math.sin(t * 5) : 0),
+        (this.settings.glow * (0.75 + 0.25 * Math.sin(t * 1.4)) + this.speechLevel * 0.5 + this.glowBoost + (this.state === "thinking" ? 0.2 * Math.sin(t * 5) : 0)) *
+        distanceDim,
       calm,
     };
   }
@@ -469,9 +529,9 @@ export class Ghost {
 
   draw(ctx: CanvasRenderingContext2D, w: number, h: number, outline = false) {
     const s = this.settings;
-    const unit = (h / 700) * s.scale;
     this.aspect = w / h;
     const l = this.layout();
+    const unit = (h / 700) * s.scale * l.depth; // hanging back shrinks him about his spot, not towards the middle
     const cx = w / 2 + s.offsetX * w + l.x * unit;
     const cy = h / 2 + s.offsetY * h + l.y * unit;
 
