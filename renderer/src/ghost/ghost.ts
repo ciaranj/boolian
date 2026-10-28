@@ -20,7 +20,7 @@ export interface GhostSettings {
 }
 
 /** Where the bow's knot sits on his head (body units, y down; his head is a circle of radius 100) and its tilt. */
-export const BOW = { x: 60, y: -94, rot: 0.55, size: 1.3 };
+export const BOW = { x: 64, y: -87, rot: 0.45, size: 1.3 };
 
 /** How long after the last listening/thinking/speaking he stays forward, by why he came. */
 const HOLD_ENGAGED_S = 60; // the server normally forgets the visitor (and he sinks back) well before this
@@ -685,7 +685,7 @@ export class Ghost {
     const shimmer = 0.5 + 0.5 * Math.sin(t * 0.9);
     const fill = ctx.createLinearGradient(-45, -30, 45, 30);
     fill.addColorStop(0, pale);
-    fill.addColorStop(clamp(shimmer * 0.8 + 0.1, 0, 1), `rgba(255, 255, 255, 0.85)`);
+    fill.addColorStop(clamp(shimmer * 0.8 + 0.1, 0, 1), `rgba(255, 238, 246, 0.8)`);
     fill.addColorStop(1, rgba([r, g, b], 0.75));
 
     ctx.save();
@@ -734,7 +734,7 @@ export class Ghost {
       ctx.beginPath();
       ctx.moveTo(side * 14, -18);
       ctx.quadraticCurveTo(side * 26, -26, side * 38, -20);
-      ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 + 0.35 * shimmer})`;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.12 + 0.12 * shimmer})`;
       ctx.lineWidth = 2.5;
       ctx.lineCap = "round";
       ctx.stroke();

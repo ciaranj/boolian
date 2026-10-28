@@ -121,7 +121,7 @@ export class Ghost3D {
   private armOutlineMat: THREE.MeshBasicMaterial;
   private arms: { side: -1 | 1; pivot: THREE.Group }[] = [];
   private bow = new THREE.Group();
-  private bowMat = new THREE.MeshStandardMaterial({ roughness: 0.25, transparent: true, opacity: 0.92 });
+  private bowMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, transparent: true, opacity: 0.92 });
   private bowOutlineMat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, transparent: true });
   private bowLoops: { side: -1 | 1; mesh: THREE.Mesh }[] = [];
   private bowTails: { side: -1 | 1; mesh: THREE.Mesh }[] = [];
@@ -586,7 +586,7 @@ export class Ghost3D {
     }
     part(new THREE.SphereGeometry(0.09, 16, 12), 1.25).scale.set(1, 0.9, 0.7);
     // Perched on the head (a unit sphere), standing a little proud of it and facing the front, tilted with the curve.
-    const at = new THREE.Vector3(0.5, 0.82, 0.42).normalize().multiplyScalar(1.04);
+    const at = new THREE.Vector3(0.54, 0.74, 0.45).normalize().multiplyScalar(1.04);
     this.bow.position.copy(at);
     this.bow.lookAt(at.clone().add(new THREE.Vector3(0.15, 0.2, 1)));
     this.bow.rotateZ(-0.55);
