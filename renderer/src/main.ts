@@ -64,6 +64,7 @@ function startStage() {
   let localSilentFor = 0;
   let autoBlockedSince = 0;
   let micInfo = "mic off";
+  let deviceMic: Record<string, unknown> = { connected: false }; // the ESP32, as the server last reported it
   let backends = "";
   const latencies: number[] = [];
   const preRoll: Int16Array[] = [];
@@ -121,6 +122,7 @@ function startStage() {
       out.newConnection();
       sentAttract = null; // a new connection is a new session: tell it
       sendAttract();
+      link.send({ type: "mic_source", source: usingDeviceMic() ? "device" : "browser" });
       log("dim", "server connected");
       if (awake) setConv("idle");
     }
@@ -180,6 +182,19 @@ function startStage() {
         log("err", text);
         break;
       }
+      case "mic_device": {
+        const was = deviceMic.connected;
+        deviceMic = e;
+        if (e.connected !== was) log(e.connected ? "dim" : "err", `ESP32 microphone ${e.connected ? "connected" : "disconnected"}`);
+        if (usingDeviceMic()) {
+          micInfo = deviceMicInfo();
+          report({ s: "info", mic: micInfo });
+        }
+        break;
+      }
+      case "motion":
+        if (e.on) log("dim", "motion seen");
+        break;
       case "session_reset":
         log("dim", `session reset (${e.reason})`);
         ghost.lurk();
@@ -213,7 +228,7 @@ function startStage() {
 
   function startCapture(by: "ptt" | "vad") {
     if (capturing) return;
-    if (!link.connected || !mic.running) {
+    if (!link.connected || !micRunning()) {
       if (by === "ptt") log("err", !link.connected ? "can't listen: not connected to the server" : `can't listen: ${micInfo.startsWith("mic unavailable") ? micInfo : "microphone not started, click wake"}`);
       return;
     }
@@ -248,7 +263,16 @@ function startStage() {
     }
   }
 
-  mic.onFrame = (pcm, db) => {
+  link.onMic = (pcm) => {
+    if (!usingDeviceMic() || !awake) return;
+    let sum = 0;
+    for (const v of pcm) sum += v * v;
+    mic.db = 20 * Math.log10(Math.sqrt(sum / pcm.length) / 32768 + 1e-9);
+    onMicFrame(pcm, mic.db);
+  };
+
+  mic.onFrame = onMicFrame;
+  function onMicFrame(pcm: Int16Array, db: number) {
     ghost.micLevel = capturing ? Math.min(1, Math.max(0, (db + 55) / 40)) : 0;
     if (capturing) {
       link.sendMic(pcm);
@@ -262,7 +286,7 @@ function startStage() {
     if (!feed) return;
     if (vad instanceof EnergyVad) vad.feed(db);
     else vad.feed(pcm);
-  };
+  }
 
   // Silero answers a few ms after the frame, so re-check that listening is still wanted.
   function onVad(ev: VadEvent) {
@@ -452,11 +476,37 @@ function startStage() {
   // ---------------------------------------------------------------- waking up (audio unlock)
 
   let mics: { id: string; label: string }[] = [];
+  // The Microphone choice that means the ESP32, whose frames come over the server link.
+  const DEVICE_MIC = "esp32";
+
+  function usingDeviceMic() {
+    return settings.micDevice === DEVICE_MIC;
+  }
+
+  function micRunning() {
+    return usingDeviceMic() ? deviceMic.connected === true : mic.running;
+  }
+
+  function deviceMicInfo() {
+    const d = deviceMic;
+    if (!d.connected) return "mic: ESP32, not connected to the server";
+    const n = (k: string, unit = "") => (typeof d[k] === "number" ? `${Math.round(d[k] as number)}${unit}` : "?");
+    return `mic: ESP32 “${d.name}” (Wi-Fi ${n("rssi", " dBm")}, ${n("gaps")} gaps, ${n("dropped")} dropped, ${n("reconnects")} reconnects)`;
+  }
 
   async function startMic() {
     const ctx = out.ctx;
     if (!ctx) return; // not awake yet: wake() starts it with the saved choice
     if (capturing) stopCapture(false);
+    link.send({ type: "mic_source", source: usingDeviceMic() ? "device" : "browser" });
+    if (usingDeviceMic()) {
+      mic.stop();
+      micInfo = deviceMicInfo();
+      log("dim", micInfo);
+      report({ s: "info", mic: micInfo });
+      await listMics();
+      return;
+    }
     try {
       try {
         await mic.start(ctx, settings.micDevice || undefined);
@@ -485,6 +535,7 @@ function startStage() {
     } catch {
       mics = [];
     }
+    mics.push({ id: DEVICE_MIC, label: "ESP32 microphone (via the server)" });
     report({ s: "mics", mics });
   }
   navigator.mediaDevices?.addEventListener("devicechange", () => awake && listMics());
@@ -592,7 +643,7 @@ function startStage() {
           : { s: "meter", db: mic.db, thresh: null, voice: vad.prob, voiceThresh: vad.threshold },
       );
       meterT = now;
-      const blocker = settings.autoListen && awake && mic.running && !capturing ? autoBlocker() : null;
+      const blocker = settings.autoListen && awake && micRunning() && !capturing ? autoBlocker() : null;
       if (!blocker || conv === "speaking" || conv === "thinking") autoBlockedSince = 0;
       else if (!autoBlockedSince) autoBlockedSince = now;
       else if (autoBlockedSince > 0 && now - autoBlockedSince > 8000) {

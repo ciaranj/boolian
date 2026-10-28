@@ -37,6 +37,18 @@ export function packMicFrame(seq: number, captureMs: number, pcm: Int16Array): A
   return buf;
 }
 
+/** A frame from the ESP32's microphone, relayed by the server: its 16 kHz PCM, or null if it isn't one. */
+export function parseMicFrame(buf: ArrayBuffer): Int16Array | null {
+  if (buf.byteLength < MIC_HEADER) return null;
+  const dv = new DataView(buf);
+  for (let i = 0; i < 4; i++) if (dv.getUint8(i) !== MIC_MAGIC[i]) return null;
+  if (dv.getUint8(4) !== VERSION) return null;
+  const n = (buf.byteLength - MIC_HEADER) >> 1;
+  const pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) pcm[i] = dv.getInt16(MIC_HEADER + i * 2, true);
+  return pcm;
+}
+
 export function parseAudioChunk(buf: ArrayBuffer): AudioChunk | null {
   if (buf.byteLength < OUT_HEADER) return null;
   const dv = new DataView(buf);
@@ -59,6 +71,7 @@ export function parseAudioChunk(buf: ArrayBuffer): AudioChunk | null {
 export class Link {
   onEvent: (e: ServerEvent) => void = () => {};
   onAudio: (c: AudioChunk) => void = () => {};
+  onMic: (pcm: Int16Array) => void = () => {};
   onStatus: (connected: boolean) => void = () => {};
   private ws: WebSocket | null = null;
   private backoff = 1000;
@@ -100,6 +113,10 @@ export class Link {
       } else {
         const chunk = parseAudioChunk(m.data as ArrayBuffer);
         if (chunk) this.onAudio(chunk);
+        else {
+          const pcm = parseMicFrame(m.data as ArrayBuffer);
+          if (pcm) this.onMic(pcm);
+        }
       }
     };
     ws.onclose = () => {

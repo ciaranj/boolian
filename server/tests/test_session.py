@@ -346,3 +346,44 @@ async def test_he_forgets_the_visitors_when_he_says_goodbye_himself():
     await convo.handle_json({"type": "text", "text": "thank you"})
     await finish(convo)
     assert not convo.history and rec.json[-1] == {"v": 1, "type": "session_reset", "reason": "he said goodbye"}
+
+
+async def test_motion_greets_newcomers_once_a_minute():
+    convo, rec = make()
+    await convo.motion(True)
+    await finish(convo)
+    assert rec.json[0] == {"v": 1, "type": "motion", "on": True}
+    assert [m["source"] for m in rec.json if m["type"] == "expression"] == ["motion"]
+    assert len(convo.history) == 1  # a greeting starts a conversation, so "still there?" follows if they don't answer
+
+    convo.history.clear()
+    await convo.motion(True)  # someone else, too soon after
+    assert not convo.busy
+    convo.last_motion_greet -= 61
+    await convo.motion(False)  # they've stopped moving: nothing to greet
+    assert not convo.busy
+    await convo.motion(True)
+    assert convo.busy
+
+
+async def test_motion_doesnt_interrupt_a_conversation_or_a_switched_off_attract_mode():
+    convo, _rec = make()
+    await convo.handle_json({"type": "text", "text": "hello"})
+    await finish(convo)
+    await convo.motion(True)  # their friend walking up behind them
+    assert not convo.busy
+
+    convo, _rec = make()
+    await convo.handle_json({"type": "attract", "on": False})
+    await convo.motion(True)
+    assert not convo.busy
+
+
+async def test_device_microphone_is_relayed_only_to_a_browser_that_chose_it():
+    convo, rec = make()
+    frame = pack_mic_frame(0, 0, bytes(640))
+    await convo.device_frame(frame)
+    assert not rec.audio
+    await convo.handle_json({"type": "mic_source", "source": "device"})
+    await convo.device_frame(frame)
+    assert len(rec.audio) == 1

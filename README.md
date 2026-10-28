@@ -117,6 +117,40 @@ and chatter, so keep it on the container and delete it when you're done with it.
 All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
 `SPECTRE_AUTH_TOKEN` enables a shared token: append `?token=…` to the page URL.
 
+## The ESP32 microphone and motion sensor
+
+An ESP32-C5 with an INMP441 microphone and an AM312 PIR, on Wi-Fi. It streams audio to the server, and a person
+walking up makes him greet them. The firmware is in `firmware/` (ESP-IDF 6.1).
+
+| INMP441 | ESP32-C5 | | AM312 | ESP32-C5 |
+|---|---|---|---|---|
+| VDD | 3V3 | | VCC (+) | 3V3 |
+| GND | GND | | GND (−) | GND |
+| SCK | GPIO4 | | OUT | GPIO3 |
+| WS | GPIO5 | | | |
+| SD | GPIO6 | | | |
+| L/R | GND | | | |
+
+Both run from 3.3 V; don't power the INMP441 from 5 V.
+
+```bash
+cd firmware
+cp main/secrets.example.h main/secrets.h   # Wi-Fi, the server's ws://SPECTRE_IP:8765/mic, a device name
+source ~/.espressif/tools/activate_idf_v6.1.sh
+idf.py build flash monitor                  # -p /dev/cu.wchusbserial… if it can't find the board
+```
+
+The serial monitor prints a line a second: level and peak in dBFS, clipping, frames sent and dropped, Wi-Fi signal,
+reconnects, free memory and the PIR state. Speech close to it should reach about −30 dBFS. If it barely moves,
+raise `MIC_GAIN` in `main.c`; if it clips, lower it.
+
+In the operator panel, choose **ESP32 microphone (via the server)** under Microphone. The info line shows its name,
+Wi-Fi signal and dropped frames, and the log says when it connects, disconnects or sees motion.
+
+**Motion:** when the PIR sees someone and nobody is talking to him, he greets them, at most once a minute
+(`SPECTRE_MOTION_GREET_S`, 0 = never). Switching attract mode off (**A**) stops it too. The attract call-outs carry
+on as before.
+
 ## On the night: runbook
 
 **Setup**
@@ -183,6 +217,7 @@ Debug and art mode: `?state=speaking&emotion=mischievous&mouth=0.6` freezes a po
 ```
 server/          FastAPI + asyncio orchestration (session.py is the heart; persona.py is his personality), pytest suite
 server/assets/   the fart and raspberry recordings (credits in noises/CREDITS.md)
+firmware/        ESP-IDF project for the ESP32-C5: microphone and PIR
 renderer/        Vite + TypeScript, Canvas 2D ghost, or three.js with ?renderer=3d
 scripts/         llm-container.sh and spectre-container.sh (setup and services), smoke_test.py (end-to-end turns and
                  latency), selftest_gpu.py, bench_chatterbox.py, make_noises.py / import_noises.py
@@ -200,8 +235,8 @@ docs/            protocol-v1.md
   base/small**: the 16 GB card fits all three, and the latency budget allowed the bigger, better-sounding models.
 - **Silero VAD in the browser**, not on the server, because the browser is where the mic is for now.
 - **Two Proxmox containers with systemd** instead of Docker Compose on a VM.
-- **Browser mic, not ESP32 (yet).** The server already accepts the ESP32 frame format (`GHST`) on the same socket.
-  ESP32 support needs a small ingress change so a separate device can feed the presenter's conversation.
+- **The ESP32's audio goes via the browser.** The server relays it to the browser, which runs Silero on it and sends it
+  back while listening, exactly as with its own mic. Push-to-talk, pre-roll and the VAD settings all work unchanged.
 - **Emotion via an inline `[emotion:action]` tag**, validated and stripped server-side, with a fallback to neutral.
 
 ## Licence

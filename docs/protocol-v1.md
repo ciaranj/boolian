@@ -24,6 +24,7 @@ therefore cannot play.
 | `reset` | | cancel and forget the conversation history |
 | `cancel` | | stop the current reply |
 | `playback` | `generation_id`, `event`: `started`/`ended`/`cancelled` | what the speakers are *actually* doing |
+| `mic_source` | `source`: `browser` / `device` | `device` asks the server to relay the ESP32's microphone frames to this browser |
 | `ping` | `t` | server replies `pong` |
 
 ## Browser → server (binary): microphone frames
@@ -43,6 +44,20 @@ therefore cannot play.
 Frames are only buffered between `listen_start` and `listen_end`; others just update sequence-gap stats.
 Malformed frames are dropped and logged.
 
+## ESP32 → server: `ws://SERVER:8765/mic[?token=…]`
+
+The microphone device has its own socket. It sends the same `GHST` binary frames, plus JSON:
+
+| type | fields | meaning |
+|---|---|---|
+| `hello` | `role: "mic"`, `device` (a name for the operator panel), `sample_rate` | on every connect; the sequence number starts again |
+| `motion` | `on` | the PIR changed |
+| `stats` | `rssi`, `db`, `peak_db`, `clips`, `dropped`, `reconnects`, `heap`, `uptime_s` | every 5 s, for the operator |
+
+The server relays the frames, unchanged, to every presenter that sent `mic_source: device`. The browser treats them as
+its own microphone: it runs voice detection on them and sends them back on its own socket while it's listening. Only
+the latest device to connect is listened to.
+
 ## Server → browser (JSON)
 
 | type | fields |
@@ -56,6 +71,10 @@ Malformed frames are dropped and logged.
 | `reply` | `text` (what was actually spoken) |
 | `cancel` | `generation_id`, `reason` |
 | `session_reset` | `reason`: `operator` / `idle` |
+| `mic_device` | `connected`, and while connected `name`, `gaps`, `bad`, plus the device's latest `stats` fields |
+| `motion` | `on`: the ESP32's PIR. With nobody talking to him and attract mode on, motion also triggers a greeting (`source: "motion"`), at most once a minute |
+
+Binary frames starting `GHST` are the ESP32's microphone, relayed (only after `mic_source: device`).
 
 `expression` is always sent before the first audio of a reply, so the face changes as the ghost starts to speak.
 

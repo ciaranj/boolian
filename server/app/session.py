@@ -50,6 +50,8 @@ class Conversation:
         self.attract = cfg.attract_s > 0  # the operator can switch attract mode off
         self.next_attract = 0.0
         self.last_attract: tuple[float, str] | None = None  # when, and what he called out
+        self.last_motion_greet = -1e9
+        self.wants_device_mic = False  # relay the ESP32's microphone to this browser
 
         self.listening = False
         self.audio = bytearray()
@@ -103,6 +105,8 @@ class Conversation:
                 await self.cancel("greet")
             emotion, action, text = persona.pick(persona.GREETINGS)
             self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="greeting"))
+        elif kind == "mic_source":
+            self.wants_device_mic = msg.get("source") == "device"
         elif kind == "attract":
             self.attract = bool(msg.get("on")) and self.cfg.attract_s > 0
             self.touch()
@@ -133,6 +137,30 @@ class Conversation:
             return
         if len(self.audio) < self.cfg.max_utterance_s * MIC_SAMPLE_RATE * 2:
             self.audio.extend(frame.pcm)
+
+    # ---- the ESP32: microphone and motion sensor -------------------------------------------
+
+    async def device_frame(self, data: bytes) -> None:
+        """A frame from the ESP32's microphone. The browser runs voice detection on it and sends it back while
+        it's listening, exactly as it does its own microphone, so push-to-talk and pre-roll work the same."""
+        if self.wants_device_mic:
+            await self._send_bytes(data)
+
+    async def device_status(self, status: dict) -> None:
+        await self._send_json({"v": 1, "type": "mic_device", **status})
+
+    async def motion(self, on: bool) -> None:
+        """The PIR saw someone (or stopped seeing them). With nobody talking to him, he greets them."""
+        await self._send_json({"v": 1, "type": "motion", "on": on})
+        if not on or not self.attract or not self.cfg.motion_greet_s:
+            return
+        now = time.monotonic()
+        if self.busy or self.listening or self.history or now - self.last_motion_greet < self.cfg.motion_greet_s:
+            return
+        self.last_motion_greet = now
+        log.info("motion: greeting")
+        emotion, action, text = persona.pick(persona.GREETINGS)
+        self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="motion"))
 
     # ---- control ---------------------------------------------------------------------------
 

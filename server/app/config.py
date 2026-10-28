@@ -55,6 +55,7 @@ class Config:
     nudge_s: float
     max_nudges: int
     attract_s: float
+    motion_greet_s: float
     max_utterance_s: float
     static_dir: str
 
@@ -93,6 +94,7 @@ def load_config() -> Config:
         nudge_s=float(_env("NUDGE_S", "12")),  # quiet seconds after he speaks before he prompts again; 0 = never
         max_nudges=int(_env("MAX_NUDGES", "2")),
         attract_s=float(_env("ATTRACT_S", "45")),  # with nobody to talk to, call out about this often (±40%); 0 = never  # "still there?" prompts before he gives up and forgets them
+        motion_greet_s=float(_env("MOTION_GREET_S", "60")),  # PIR: greet newcomers at most this often; 0 = never
         max_utterance_s=float(_env("MAX_UTTERANCE_S", "15")),
         static_dir=_env("STATIC_DIR", ""),
     )
