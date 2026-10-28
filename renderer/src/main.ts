@@ -423,7 +423,10 @@ function startStage() {
   }
 
   function applySettings() {
-    ghost.settings = { scale: settings.scale, offsetX: settings.offsetX, offsetY: settings.offsetY, glow: settings.glow };
+    ghost.settings = { scale: settings.scale, offsetX: settings.offsetX, offsetY: settings.offsetY,
+      clipLeft: settings.clipLeft, clipRight: settings.clipRight, glow: settings.glow };
+    const { clipTop: t, clipRight: r, clipBottom: b, clipLeft: l } = settings;
+    document.documentElement.style.setProperty("--viewport", `inset(${t * 100}% ${r * 100}% ${b * 100}% ${l * 100}%)`);
     ghost.palette = paletteOf(q.get("palette") ?? settings.palette);
     out.setVolume(settings.volume);
     out.setReverb(settings.reverb);
@@ -521,6 +524,7 @@ function startStage() {
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ghost.aspect = cw / ch;
     ghost3d?.resize(cw, ch);
   }
   window.addEventListener("resize", resize);

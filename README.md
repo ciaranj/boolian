@@ -130,6 +130,8 @@ All settings are `SPECTRE_*` environment variables; see `server/app/config.py`.
 5. Press **O** and click **Open remote control window**. Drag the new window to the laptop screen. You operate
    from there; the projector shows only the ghost. Press **O** in the stage window again to hide its panel.
 6. Press **K** for the test pattern, then line up scale and position with the arrow keys and +/-. Press **K** again to exit.
+   To crop the picture to a window, doorway or screen, use the **Mask** sliders under Projection: they black out
+   each edge of the projector and stay put when you rescale or move the ghost.
 7. If you use Bluetooth speakers, raise **Speaker delay** until the mouth matches the sound. Set Reverb and the
    voice effects (Waver, Flanger, Echo, Shadow voice) on the real speaker; each costs a little clarity.
 8. Hold Space and say "hello". Check the log and latency readout.

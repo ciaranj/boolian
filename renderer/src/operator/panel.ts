@@ -6,7 +6,7 @@ import type { Cmd, Status } from "./bus";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-export const SLIDERS = ["scale", "offsetX", "offsetY", "glow", "volume", "reverb", "fxWaver", "fxFlange", "fxEcho", "fxShadow", "extraLatencyMs", "vadThreshold", "vadPauseMs"] as const;
+export const SLIDERS = ["scale", "offsetX", "offsetY", "clipLeft", "clipRight", "clipTop", "clipBottom", "glow", "volume", "reverb", "fxWaver", "fxFlange", "fxEcho", "fxShadow", "extraLatencyMs", "vadThreshold", "vadPauseMs"] as const;
 
 const pct = (db: number) => `${Math.max(0, Math.min(100, ((db + 80) / 80) * 100))}%`;
 

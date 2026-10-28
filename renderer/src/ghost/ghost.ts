@@ -12,6 +12,8 @@ export interface GhostSettings {
   scale: number;
   offsetX: number; // fraction of width
   offsetY: number; // fraction of height
+  clipLeft: number; // the viewport mask, as fractions of width (0 = no mask on that side)
+  clipRight: number;
   glow: number;
 }
 
@@ -52,6 +54,7 @@ interface ActiveAction {
   kind: "spin" | "hide" | "peek";
   start: number;
   dur: number;
+  edge: -1 | 1; // peek: which way he leans out (-1 from behind a left edge, 1 a right one)
 }
 
 interface Pose {
@@ -62,6 +65,7 @@ interface Pose {
   alpha: number;
   sx: number;
   sy: number;
+  pin: number; // 0..1: how much the idle sway is held still (so a peek stays tucked behind its edge)
 }
 
 /** Where the body sits this frame, in ghost units around the screen centre (y down). */
@@ -93,7 +97,9 @@ export class Ghost {
   speechLevel = 0;
   /** Visitor microphone loudness 0..1 while listening. */
   micLevel = 0;
-  settings: GhostSettings = { scale: 1, offsetX: 0, offsetY: 0, glow: 1 };
+  settings: GhostSettings = { scale: 1, offsetX: 0, offsetY: 0, clipLeft: 0, clipRight: 0, glow: 1 };
+  /** Screen width / height, set by whoever owns the canvas; the peek needs it to find the mask edges. */
+  aspect = 16 / 9;
   palette: Palette = PALETTES.spectral;
 
   private t = 0;
@@ -177,7 +183,7 @@ export class Ghost {
       if (this.action || (!force && this.t - this.lastDramatic < 6)) return;
       this.lastDramatic = this.t;
       const dur = { spin: 1.0, hide: 2.4, peek: 2.8 }[action as "spin" | "hide" | "peek"];
-      this.action = { kind: action as ActiveAction["kind"], start: this.t, dur };
+      this.action = { kind: action as ActiveAction["kind"], start: this.t, dur, edge: this.peekEdge() };
       return;
     }
     if (action === "bounce") {
@@ -323,7 +329,7 @@ export class Ghost {
   }
 
   private pose(): Pose {
-    const pose: Pose = { dx: 0, dy: 0, rot: 0, spin: 0, alpha: 1, sx: 1, sy: 1 };
+    const pose: Pose = { dx: 0, dy: 0, rot: 0, spin: 0, alpha: 1, sx: 1, sy: 1, pin: 0 };
     const r = this.rudeNoise;
     if (r) {
       const since = this.t - r.start;
@@ -352,24 +358,48 @@ export class Ghost {
         pose.dy = 50 * (1 - easeOutBack(q));
       }
     } else if (a.kind === "peek") {
-      const side = -260;
+      const side = this.peekX(a.edge);
+      const lean = -0.4 * a.edge;
       if (p < 0.15) {
         pose.alpha = 1 - p / 0.15;
       } else if (p < 0.3) {
         const q = (p - 0.15) / 0.15;
         pose.alpha = q;
         pose.dx = side;
-        pose.rot = 0.4;
+        pose.rot = lean;
+        pose.pin = 1;
       } else if (p < 0.62) {
         pose.dx = side + Math.sin((p - 0.3) * 30) * 6;
-        pose.rot = 0.4 + Math.sin((p - 0.3) * 20) * 0.04;
+        pose.rot = lean + Math.sin((p - 0.3) * 20) * 0.04;
+        pose.pin = 1;
       } else {
         const q = easeInOut((p - 0.62) / 0.38);
         pose.dx = side * (1 - q);
-        pose.rot = 0.4 * (1 - q);
+        pose.rot = lean * (1 - q);
+        pose.pin = 1 - q;
       }
     }
     return pose;
+  }
+
+  /** The side to peek from: the masked edge nearest where he floats, else his left (-1) as before. */
+  private peekEdge(): -1 | 1 {
+    const { clipLeft, clipRight, offsetX } = this.settings;
+    if (clipLeft <= 0 && clipRight <= 0) return -1;
+    if (clipLeft <= 0) return 1;
+    if (clipRight <= 0) return -1;
+    const cx = 0.5 + offsetX;
+    return cx - clipLeft <= 1 - clipRight - cx ? -1 : 1;
+  }
+
+  /** Sideways shift (ghost units) that tucks him behind that side's mask edge with an eye showing. */
+  private peekX(edge: -1 | 1) {
+    const s = this.settings;
+    const clip = edge < 0 ? s.clipLeft : s.clipRight;
+    if (clip <= 0) return 260 * edge; // no mask that side: just pop up beside where he was
+    const edgeX = edge < 0 ? clip : 1 - clip; // fraction of width
+    const unitsPerWidth = (this.aspect * 700) / s.scale; // matches draw(): one unit is h / 700 * scale px
+    return (edgeX - 0.5 - s.offsetX) * unitsPerWidth + 15 * edge; // centre just behind the edge
   }
 
   /** Advances the sideways drag, so call it once per frame (draw() does). */
@@ -380,7 +410,7 @@ export class Ghost {
 
     const bob = Math.sin(t * 1.25) * 11 * calm + Math.sin(t * 0.47) * 4;
     const sway = (Math.sin(t * 0.5) * 18 + Math.sin(t * 0.21) * 12) * calm;
-    const x = sway + pose.dx;
+    const x = sway * (1 - pose.pin) + pose.dx;
     this.drag = approach(this.drag, clamp((x - this.lastX) * 2.5, -25, 25), 4, 1 / 60);
     this.lastX = x;
 
@@ -440,6 +470,7 @@ export class Ghost {
   draw(ctx: CanvasRenderingContext2D, w: number, h: number, outline = false) {
     const s = this.settings;
     const unit = (h / 700) * s.scale;
+    this.aspect = w / h;
     const l = this.layout();
     const cx = w / 2 + s.offsetX * w + l.x * unit;
     const cy = h / 2 + s.offsetY * h + l.y * unit;

@@ -2,6 +2,12 @@ export interface Settings {
   scale: number;
   offsetX: number;
   offsetY: number;
+  // the viewport: how far each edge of the screen is masked off, as a fraction of width/height,
+  // fixed to the screen and independent of scale and offset
+  clipLeft: number;
+  clipRight: number;
+  clipTop: number;
+  clipBottom: number;
   glow: number;
   volume: number;
   reverb: number;
@@ -32,6 +38,10 @@ export function loadSettings(): Settings {
     scale: 1,
     offsetX: 0,
     offsetY: 0,
+    clipLeft: 0,
+    clipRight: 0,
+    clipTop: 0,
+    clipBottom: 0,
     glow: 1,
     volume: 0.9,
     reverb: 0.35,
