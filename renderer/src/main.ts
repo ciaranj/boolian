@@ -197,6 +197,8 @@ function startStage() {
       case "motion":
         if (e.on) {
           log("dim", "motion seen");
+          // He comes forward even when he won't greet them (greeted someone lately, already talking, attract off).
+          if (awake) ghost.approach();
           greetOnMotion();
         }
         break;

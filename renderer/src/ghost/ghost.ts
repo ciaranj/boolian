@@ -25,6 +25,7 @@ export const BOW = { x: 64, y: -87, rot: 0.45, size: 1.3 };
 /** How long after the last listening/thinking/speaking he stays forward, by why he came. */
 const HOLD_ENGAGED_S = 60; // the server normally forgets the visitor (and he sinks back) well before this
 const HOLD_CALLOUT_S = 5;
+const HOLD_MOTION_S = 15; // someone walked up but hasn't said anything (yet)
 
 interface Face {
   eyeScale: number;
@@ -170,12 +171,23 @@ export class Ghost {
 
   /** Someone is talking to him: swoop to the front and stay there while they do. */
   notice() {
+    this.comeForward(HOLD_ENGAGED_S);
+  }
+
+  /** The motion sensor saw someone: swoop to the front to meet them, whether or not he greets them out loud,
+   * and sink back again if they don't say anything. */
+  approach() {
+    if (this.state === "sleeping") return;
+    this.comeForward(this.presenceTarget >= 1 ? Math.max(this.presenceHold, HOLD_MOTION_S) : HOLD_MOTION_S);
+  }
+
+  private comeForward(hold: number) {
     if (this.presenceTarget < 1 && this.presence < 0.6) {
       this.glowBoost = Math.max(this.glowBoost, 0.6);
       this.squash.kick(2);
     }
     this.presenceTarget = 1;
-    this.presenceHold = HOLD_ENGAGED_S;
+    this.presenceHold = hold;
     this.lastActive = this.t;
   }
 

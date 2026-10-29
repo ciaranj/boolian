@@ -236,7 +236,8 @@ it. Now a page that doesn't take a message within 2 s (`SPECTRE_SEND_DEADLINE_S`
 
 **Motion:** when the PIR sees someone and nobody is talking to him, he greets them, at most once a minute
 (`SPECTRE_MOTION_GREET_S`, 0 = never). Switching attract mode off (**A**) stops it too. The attract call-outs carry
-on as before.
+on as before. Whether or not he greets them, motion always brings him forward out of the gloom; he drifts back
+after about 15 s if nobody speaks.
 
 ## On the night: runbook
 
