@@ -102,7 +102,7 @@ class Conversation:
                 emotion, action = str(msg.get("emotion", "neutral")), str(msg.get("action", "none"))
                 self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="puppet"))
         elif kind == "greet" and msg.get("source") == "motion":
-            self._motion_greet()
+            await self._motion_greet()
         elif kind == "greet":
             if self.busy:
                 await self.cancel("greet")
@@ -157,15 +157,30 @@ class Conversation:
         whether they've already started talking, which the server can't until its voice detector has decided."""
         await self._send_json({"v": 1, "type": "motion", "on": on})
 
-    def _motion_greet(self) -> None:
-        """A greeting for whoever the PIR saw, if nobody is talking to him and he hasn't greeted anyone lately."""
+    async def _motion_greet(self) -> None:
+        """A greeting for whoever the PIR saw, if nobody is talking to him and he hasn't greeted anyone lately.
+        The browser is told either way, and why not, so it can try again once he's finished what he's saying."""
         now = time.monotonic()
-        if not self.attract or not self.cfg.motion_greet_s or self.busy or self.listening or self.history:
-            return
-        if now - self.last_motion_greet < self.cfg.motion_greet_s:
+        reason, retry = None, False
+        if not self.cfg.motion_greet_s:
+            reason = "motion greetings are switched off"
+        elif not self.attract:
+            reason = "attract mode is off"
+        elif self.listening:
+            reason, retry = "someone's talking", True
+        elif self.history:
+            reason = "he's still with the last visitors"
+        elif self.busy:
+            reason, retry = "he's already saying something", True
+        elif (ago := now - self.last_motion_greet) < self.cfg.motion_greet_s:
+            reason = f"he greeted someone {ago:.0f} s ago"
+        if reason:
+            log.info("motion: not greeting, %s", reason)
+            await self._send_json({"v": 1, "type": "motion_greet", "greeted": False, "reason": reason, "retry": retry})
             return
         self.last_motion_greet = now
         log.info("motion: greeting")
+        await self._send_json({"v": 1, "type": "motion_greet", "greeted": True})
         emotion, action, text = persona.pick(persona.GREETINGS)
         self._start("say", lambda gen, t: self._say_turn(gen, t, emotion, action, text, source="motion"))
 

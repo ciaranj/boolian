@@ -116,6 +116,8 @@ function startStage() {
     if (!ok) {
       out.cancel();
       stopCapture(false);
+      motionUntil = 0;
+      motionAsked = false;
       if (!speakingLocally) setConv("sleeping");
       log("dim", "server disconnected");
     } else {
@@ -188,6 +190,7 @@ function startStage() {
         const was = deviceMic.connected;
         deviceMic = e;
         if (e.connected !== was) log(e.connected ? "dim" : "err", `ESP32 microphone ${e.connected ? "connected" : "disconnected"}`);
+        if (!e.connected) motionStopped(); // nobody will tell us when the PIR stops seeing them now
         if (usingDeviceMic()) {
           micInfo = deviceMicInfo();
           report({ s: "info", mic: micInfo });
@@ -200,7 +203,17 @@ function startStage() {
           // He comes forward even when he won't greet them (greeted someone lately, already talking, attract off).
           if (awake) ghost.approach();
           greetOnMotion();
-        }
+        } else motionStopped();
+        break;
+      case "motion_greet":
+        motionAsked = false;
+        if (e.greeted) {
+          motionUntil = 0;
+          log("dim", "motion: greeting them");
+        } else if (!e.retry || performance.now() > motionUntil) {
+          motionUntil = 0;
+          log("dim", `motion seen, not greeting: ${String(e.reason)}`);
+        } else motionNextTry = performance.now() + 500;
         break;
       case "session_reset":
         log("dim", `session reset (${e.reason})`);
@@ -280,12 +293,44 @@ function startStage() {
 
   // Someone walking up often starts talking at once. Greeting them then would talk over their first words, and the
   // voice detector takes a moment to say "start", so it's the browser, which can hear them, that asks to greet.
+  // They often arrive mid call-out or chattering, so it keeps trying while the PIR can see them and for a few
+  // seconds after, and says why if he never does.
+  const MOTION_GREET_TRY_MS = 8000;
   let lastVoiceAt = -1e9;
   let roomDb = -60; // the room's background level, followed slowly (quickly downwards)
+  let motionUntil = 0; // still trying to greet whoever the PIR saw, until then (Infinity while it still sees them)
+  let motionAsked = false; // waiting for the server to say whether it will
+  let motionNextTry = 0;
   function greetOnMotion() {
-    if (!awake || capturing || conv !== "idle" || out.playing || speakingLocally) return;
-    if (performance.now() - lastVoiceAt < 2000) return;
-    link.send({ type: "greet", source: "motion" });
+    if (!awake || !link.connected) return;
+    motionUntil = Infinity;
+    motionNextTry = 0;
+    tryMotionGreet(performance.now());
+  }
+
+  function motionStopped() {
+    if (motionUntil === Infinity) motionUntil = performance.now() + MOTION_GREET_TRY_MS;
+  }
+
+  /** Why the browser won't greet whoever the PIR saw just now, or null if it can ask the server to. */
+  function motionBlocker(now: number): string | null {
+    if (capturing) return "someone's talking";
+    if (conv !== "idle") return `he's ${conv}`;
+    if (out.playing || speakingLocally) return "he's still speaking";
+    if (now - lastVoiceAt < 2000) return `heard someone ${((now - lastVoiceAt) / 1000).toFixed(1)} s ago`;
+    return null;
+  }
+
+  function tryMotionGreet(now: number) {
+    if (!motionUntil || motionAsked || now < motionNextTry) return;
+    const why = motionBlocker(now);
+    if (!why) {
+      motionAsked = true;
+      link.send({ type: "greet", source: "motion" });
+    } else if (now > motionUntil) {
+      log("dim", `motion seen, not greeting: ${why}`);
+      motionUntil = 0;
+    }
   }
 
   mic.onFrame = onMicFrame;
@@ -642,6 +687,7 @@ function startStage() {
     }
     if (conv === "thinking" && now - thinkingSince > 25000) setConv("idle"); // never get stuck pondering
     out.reap();
+    tryMotionGreet(now);
 
     ghost.update(dt);
     if (ghost3d && !testPattern) {

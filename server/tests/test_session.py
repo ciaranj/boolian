@@ -361,6 +361,9 @@ async def test_motion_is_passed_to_the_browser_which_asks_for_the_greeting():
     convo.history.clear()
     await convo.handle_json({"type": "greet", "source": "motion"})  # someone else, too soon after
     assert not convo.busy
+    answer = rec.json[-1]
+    assert answer["type"] == "motion_greet" and not answer["greeted"] and not answer["retry"]
+    assert "greeted someone" in answer["reason"]
     convo.last_motion_greet -= 61
     await convo.handle_json({"type": "greet", "source": "motion"})
     assert convo.busy
@@ -382,6 +385,18 @@ async def test_motion_doesnt_greet_over_a_conversation_a_listening_mic_or_a_swit
     await convo.handle_json({"type": "attract", "on": False})
     await convo.handle_json({"type": "greet", "source": "motion"})
     assert not convo.busy
+
+
+async def test_motion_greeting_during_a_call_out_tells_the_browser_to_try_again():
+    convo, rec = make()
+    await convo.handle_json({"type": "say", "text": "Is anybody out there?", "emotion": "curious", "action": "none"})
+    await convo.handle_json({"type": "greet", "source": "motion"})
+    answer = [m for m in rec.json if m["type"] == "motion_greet"]
+    assert answer == [{"v": 1, "type": "motion_greet", "greeted": False, "reason": "he's already saying something", "retry": True}]
+    await finish(convo)
+    convo.history.clear()  # the puppet line was remembered; a call-out isn't
+    await convo.handle_json({"type": "greet", "source": "motion"})
+    assert rec.json[-1] == {"v": 1, "type": "motion_greet", "greeted": True} and convo.busy
 
 
 async def test_device_microphone_is_relayed_only_to_a_browser_that_chose_it():

@@ -72,7 +72,8 @@ the latest device to connect is listened to.
 | `cancel` | `generation_id`, `reason` |
 | `session_reset` | `reason`: `operator` / `idle` |
 | `mic_device` | `connected`, and while connected `name`, `gaps`, `bad`, plus the device's latest `stats` fields |
-| `motion` | `on`: the ESP32's PIR. The browser answers with `greet` (`source: "motion"`) unless it has heard anyone talking in the last 2 s, so he doesn't talk over someone who walked up already speaking |
+| `motion` | `on`: the ESP32's PIR. The browser answers with `greet` (`source: "motion"`) once he's idle and it hasn't heard anyone talking for 2 s, so he doesn't talk over someone who walked up already speaking. It keeps trying while the PIR is on and for 8 s after |
+| `motion_greet` | the answer to `greet` with `source: "motion"`: `greeted`, and if not, `reason` (in words, for the operator's log) and `retry` (true if he's only busy for a moment, so the browser can ask again) |
 
 Binary frames starting `GHST` are the ESP32's microphone, relayed (only after `mic_source: device`).
 
