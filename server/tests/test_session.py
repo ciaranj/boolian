@@ -387,6 +387,20 @@ async def test_motion_doesnt_greet_over_a_conversation_a_listening_mic_or_a_swit
     assert not convo.busy
 
 
+async def test_motion_after_a_goodbye_greets_the_next_visitors_once_the_last_have_had_time_to_leave():
+    convo, rec = make()
+    await convo.handle_json({"type": "greet", "source": "motion"})
+    await finish(convo)
+    await convo.reset("goodbye")
+    await convo.handle_json({"type": "greet", "source": "motion"})  # them walking off
+    assert not convo.busy and "said goodbye" in rec.json[-1]["reason"] and not rec.json[-1]["retry"]
+    convo.last_forget -= convo.cfg.motion_leaving_s  # they've had time to go
+    convo.last_motion_greet -= convo.cfg.motion_leaving_s
+    await convo.handle_json({"type": "greet", "source": "motion"})  # well inside the minute, but someone new
+    assert rec.json[-1] == {"v": 1, "type": "motion_greet", "greeted": True}
+    await finish(convo)
+
+
 async def test_motion_greeting_during_a_call_out_tells_the_browser_to_try_again():
     convo, rec = make()
     await convo.handle_json({"type": "say", "text": "Is anybody out there?", "emotion": "curious", "action": "none"})

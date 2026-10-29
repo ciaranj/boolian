@@ -20,7 +20,7 @@ therefore cannot play.
 | `listen_abort` | | discard captured audio (too short, operator cancel) |
 | `text` | `text` | typed visitor input (operator panel); skips STT |
 | `say` | `text`, `emotion`, `action` | puppet line: speak exactly this, no LLM |
-| `greet` | `source?` | random canned greeting. With `source: "motion"` it's the browser asking to greet someone the PIR saw: the server only does it with nobody talking to him, attract mode on, and at most once a minute |
+| `greet` | `source?` | random canned greeting. With `source: "motion"` it's the browser asking to greet someone the PIR saw: the server only does it with nobody talking to him, attract mode on, and at most once a minute, or 10 s after he last forgot a visitor |
 | `reset` | | cancel and forget the conversation history |
 | `cancel` | | stop the current reply |
 | `playback` | `generation_id`, `event`: `started`/`ended`/`cancelled` | what the speakers are *actually* doing |

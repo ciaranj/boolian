@@ -235,11 +235,12 @@ Every open page gets the ESP32's audio, so a laptop asleep with the page open us
 it. Now a page that doesn't take a message within 2 s (`SPECTRE_SEND_DEADLINE_S`) is dropped; it reconnects when it wakes.
 
 **Motion:** when the PIR sees someone and nobody is talking to him, he greets them, at most once a minute
-(`SPECTRE_MOTION_GREET_S`, 0 = never). Switching attract mode off (**A**) stops it too. The attract call-outs carry
-on as before. If he's mid call-out, or hears them chattering as they arrive, he waits for a gap, for as long as the
-PIR sees them and 8 s after. Whether or not he greets them, motion always brings him forward out of the gloom; he
-drifts back after about 15 s if nobody speaks. When he doesn't greet someone, the operator's log says why ("motion
-seen, not greeting: he greeted someone 34 s ago").
+(`SPECTRE_MOTION_GREET_S`, 0 = never), unless he's said goodbye to them since: then anyone the PIR sees after 10 s
+(`SPECTRE_MOTION_LEAVING_S`, time for the last lot to walk off) is greeted. Switching attract mode off (**A**) stops
+it too. The attract call-outs carry on as before. If he's mid call-out, or hears them chattering as they arrive, he
+waits for a gap, for as long as the PIR sees them and 8 s after. Whether or not he greets them, motion always brings
+him forward out of the gloom; he drifts back after about 15 s if nobody speaks. When he doesn't greet someone, the
+operator's log says why ("motion seen, not greeting: he greeted someone 34 s ago").
 
 ## On the night: runbook
 

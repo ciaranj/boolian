@@ -51,6 +51,7 @@ class Conversation:
         self.next_attract = 0.0
         self.last_attract: tuple[float, str] | None = None  # when, and what he called out
         self.last_motion_greet = -1e9
+        self.last_forget = -1e9  # when he last forgot a visitor (goodbye, nobody there, the operator)
         self.jokes = persona.repertoire()  # the riddles and jokes he knows for these visitors
         self.wants_device_mic = False  # relay the ESP32's microphone to this browser
 
@@ -158,7 +159,8 @@ class Conversation:
         await self._send_json({"v": 1, "type": "motion", "on": on})
 
     async def _motion_greet(self) -> None:
-        """A greeting for whoever the PIR saw, if nobody is talking to him and he hasn't greeted anyone lately.
+        """A greeting for whoever the PIR saw, if nobody is talking to him and he hasn't greeted anyone lately, or
+        has said goodbye to them since: the PIR sees them leave, but anyone after that is someone new.
         The browser is told either way, and why not, so it can try again once he's finished what he's saying."""
         now = time.monotonic()
         reason, retry = None, False
@@ -172,8 +174,10 @@ class Conversation:
             reason = "he's still with the last visitors"
         elif self.busy:
             reason, retry = "he's already saying something", True
-        elif (ago := now - self.last_motion_greet) < self.cfg.motion_greet_s:
+        elif (ago := now - self.last_motion_greet) < self.cfg.motion_greet_s and self.last_forget < self.last_motion_greet:
             reason = f"he greeted someone {ago:.0f} s ago"
+        elif (left := now - self.last_forget) < self.cfg.motion_leaving_s:
+            reason = f"he said goodbye {left:.0f} s ago, so it's probably them leaving"
         if reason:
             log.info("motion: not greeting, %s", reason)
             await self._send_json({"v": 1, "type": "motion_greet", "greeted": False, "reason": reason, "retry": retry})
@@ -214,6 +218,7 @@ class Conversation:
     async def _forget(self, reason: str) -> None:
         self.history.clear()
         self.nudges = 0
+        self.last_forget = time.monotonic()
         self._log("reset", reason=reason)
         self.convo = new_id()
         self.jokes = persona.repertoire()
