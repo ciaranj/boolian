@@ -2,6 +2,10 @@
 
 <p align="center"><img src="docs/boolian.png" alt="Boolian, a smiling cyan cartoon ghost glowing on a dark background" width="420"></p>
 
+A minute with Boolian (sound on): he asks a riddle, blows a raspberry and farts, all unscripted, on the real models.
+
+https://github.com/user-attachments/assets/3a157a42-1574-4f8e-9b2c-9989ec5ac0d2
+
 A friendly, cheeky British cartoon ghost, projected from a laptop's web browser. He listens through a microphone, thinks with
 local AI (Whisper → Gemma 4 12B in llama.cpp → a cloned Chatterbox-Turbo voice, all on one 16 GB GPU) and answers
 with a matching face, mouth, moves and voice. Everything runs on the local network; no cloud services.
